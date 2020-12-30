@@ -1,0 +1,635 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: GuardDuty for EC2 and IAM with Security Hub
+
+# ---------------------------------------------------------------------------------------------------------------
+# CloudFormation Template 2 of 2
+#
+# GuardDuty detects EC2 and IAM attacks. Security Hub Remediates.
+# 
+# EC2 Recon Attack, EC2 Maliciuous IP and IAM Password Policy change with AWS GuardDuty. 
+# Can be extended for any GuardDuty EC2 or IAM related threat findings
+# Also automates GuardDuty Finding generation 
+#
+# Automated Remediations for GuardDuty for EC2 and IAM using AWS Security Hub
+#
+#
+# @kmmahaj
+##
+## License:
+## This code is made available under the MIT-0 license. See the LICENSE file.
+# ----------------------------------------------------------------------------------------------------------------
+
+Parameters: 
+  KeyName:
+    Description: EC2 Key Pair
+    Type: "AWS::EC2::KeyPair::KeyName"
+  EmailAddress:
+    Type: String
+    Description: SNS Email Address
+    Default: "kmmahaj@amazon.com"
+Mappings:
+  RegionMap:
+    us-east-2:
+      "AMALINUX" : "ami-0e01ce4ee18447327" 
+    us-east-1:
+      "AMALINUX" : "ami-0fc61db8544a617ed" 
+    us-west-1:
+      "AMALINUX" : "ami-09a7fe78668f1e2c0" 
+    us-west-2:
+      "AMALINUX" : "ami-0ce21b51cb31a48b8" 
+
+Resources:
+
+# -----------------------------------------------------------------------------------------------------------------------
+# GuardDuty Setup
+# Provisions GuardDuty CW Events, Remediation Lambdas, SNS topic and Associated Roles
+# 
+# .......................................................................................................................
+
+  # GuardDuty CloudWatch Event - For GuardDuty Finding: Stealth:IAM/PasswordPolicyChange
+  GuardDutyIAMEvent:
+    DependsOn:
+      - GuardDutyRemediationIAMLambda
+      - SnsTopic
+    Type: AWS::Events::Rule
+    Properties:
+      Name: GuardDuty-IAM-Finding
+      Description: "GuardDuty IAM Event"
+      EventPattern:
+        source:
+        - aws.guardduty
+        detail:
+          type:
+          - Stealth:IAMUser/PasswordPolicyChange
+      State: ENABLED
+      Targets:
+        -
+          Arn: !Ref SnsTopic
+          Id: "GuardDutyIAMEvent-SNS-Trigger"
+
+
+  # GuardDuty CloudWatch Event - For GuardDuty Finding:  Recon:EC2/Portscan
+  GuardDutyEC2Event:
+    DependsOn:
+      - SnsTopic
+    Type: AWS::Events::Rule
+    Properties:
+      Name: GuardDuty-EC2-Finding
+      Description: "GuardDuty EC2 Event"
+      EventPattern:
+        source:
+        - aws.guardduty
+        detail:
+          type:
+          - Recon:EC2/Portscan
+      State: ENABLED
+      Targets:
+        -
+          Arn: !Ref SnsTopic
+          Id: "GuardDutyEC2Event-SNS-Trigger"
+
+  SnsTopic:
+    Type: "AWS::SNS::Topic"
+  SnsSubscription:
+    Type: "AWS::SNS::Subscription"
+    Properties:
+      Endpoint: !Ref EmailAddress
+      Protocol: "email"
+      TopicArn: !Ref SnsTopic
+
+  EventTopicPolicy:
+    Type: 'AWS::SNS::TopicPolicy'
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: 'sns:Publish'
+            Resource: '*'
+      Topics:
+        - !Ref SnsTopic
+
+# S3 Threat List Bucket for GuardDuty
+  GDThreatListBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "s3-gd-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      AccessControl: BucketOwnerFullControl
+      LifecycleConfiguration:
+        Rules:
+          -
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 3
+            NoncurrentVersionExpirationInDays: 3
+            Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        -
+          Key: Description
+          Value: S3 Bucket for GD Threat List
+      VersioningConfiguration:
+        Status: Enabled
+
+
+# -------------------------------------------------------------------------------------------------------------------------------------------------------
+# 3. Create Remediation in Security Hub
+# -------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  CreateSecurityHubCustomActionTargetLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: CreateSecurityHubCustomActionTargetLambda-GuardDuty
+      Description: Custom resource to create an action target in Security Hub
+      Handler: index.lambda_handler
+      MemorySize: 256
+      Role: !GetAtt CreateSecurityHubCustomActionTargetLambdaRole.Arn
+      Runtime: python3.7
+      Timeout: 60
+      Environment:
+        Variables:
+          Region: !Ref 'AWS::Region'
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import os
+          def lambda_handler(event, context):
+              try:
+                  properties = event['ResourceProperties']
+                  region = os.environ['Region']
+                  client = boto3.client('securityhub', region_name=region)
+                  responseData = {}
+                  if event['RequestType'] == 'Create':
+                      response = client.create_action_target(
+                          Name=properties['Name'],
+                          Description=properties['Description'],
+                          Id=properties['Id']
+                      )
+                      responseData['Arn'] = response['ActionTargetArn']
+                  elif event['RequestType'] == 'Delete':
+                      account_id = context.invoked_function_arn.split(":")[4]
+                      client.delete_action_target(
+                          ActionTargetArn=f"arn:aws:securityhub:{region}:{account_id}:action/custom/{properties['Id']}"
+                      )
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+              except Exception as e:
+                  print(e)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+  
+  CreateSecurityHubCustomActionTargetLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Policies:
+      - PolicyName: CreateActionTarget-LambdaPolicy-GuardDuty
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - securityhub:CreateActionTarget
+            - securityhub:DeleteActionTarget
+            Resource: '*'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal: { Service: lambda.amazonaws.com }
+          Action:
+          - sts:AssumeRole
+
+# -------------------------------------------------------------------------------------------------------------------------------------------------------
+# Create Security Hub Remediation to Block Malicious EC2
+# -------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  GDEC2RemediateRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Name: GDEC2RemediateRule
+      Description: "GD-RemeEC2 - Stop or Quarantine Malicious EC2"
+      EventPattern: 
+        source: 
+          - aws.securityhub
+        detail-type: 
+          - Security Hub Findings - Custom Action
+        resources: 
+          - !GetAtt GDEC2ActionTarget.Arn
+      State: "ENABLED"
+      Targets: 
+        - 
+          Arn: 
+            Fn::GetAtt: 
+              - "GDEC2RemediateLambda"
+              - "Arn"
+          Id: "GDRemeEC2"
+  
+  GDEC2ActionTarget:
+    Type: Custom::ActionTarget
+    Version: 1.0
+    Properties:
+      ServiceToken: !GetAtt CreateSecurityHubCustomActionTargetLambda.Arn
+      Name: GDRemeEC2
+      Description: Stop or Quarantine Malicious EC2
+      Id: GDRemeEC2
+
+  GDEC2RemediateLambdaPermission: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: "GDEC2RemediateLambda"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: 
+        Fn::GetAtt: 
+          - "GDEC2RemediateRule"
+          - "Arn"
+
+  GDEC2RemediateLambda:
+    DependsOn:
+      - EC2VPC1
+      - GDEC2RemediateLambdaRole
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: "index.handler"
+      Environment:
+        Variables:
+          INSTANCE_ID: !Ref EC2VPC1
+      Role:
+        Fn::GetAtt:
+          - "GDEC2RemediateLambdaRole"
+          - "Arn"
+      Code:
+        ZipFile: |
+          from __future__ import print_function
+          from botocore.exceptions import ClientError
+          import boto3
+          import json
+          import os
+
+          def handler(event, context):
+            try:
+              ec2 = boto3.client('ec2')
+              instanceID = os.environ['INSTANCE_ID']
+              response = ec2.stop_instances(
+                    InstanceIds=[
+                        instanceID,
+                    ],
+              )
+            except ClientError as e:
+              print(e)
+            return response
+      Runtime: "python3.7"
+      Timeout: "35"
+
+  GDEC2RemediateLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2FullAccess
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+
+# -------------------------------------------------------------------------------------------------------------------------------------------------------
+# Create Security Hub Remediation to Update IAM Password Policy
+# -------------------------------------------------------------------------------------------------------------------------------------------------------
+
+  GDIAMRemediateRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Name: GDIAMRemediateRule
+      Description: "GD-RemeIAM - Update Password Policy"
+      EventPattern: 
+        source: 
+          - aws.securityhub
+        detail-type: 
+          - Security Hub Findings - Custom Action
+        resources: 
+          - !GetAtt GDIAMActionTarget.Arn
+      State: "ENABLED"
+      Targets: 
+        - 
+          Arn: 
+            Fn::GetAtt: 
+              - "GuardDutyRemediationIAMLambda"
+              - "Arn"
+          Id: "GDRemeIAM"
+  
+  GDIAMActionTarget:
+    Type: Custom::ActionTarget
+    Version: 1.0
+    Properties:
+      ServiceToken: !GetAtt CreateSecurityHubCustomActionTargetLambda.Arn
+      Name: GDRemeIAM
+      Description: Update Password Policy
+      Id: GDRemeIAM
+
+  GDIAMRemediateLambdaPermission: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: "GuardDutyRemediationIAMLambda"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: 
+        Fn::GetAtt: 
+          - "GDIAMRemediateRule"
+          - "Arn"
+  
+  # Remediation Lambda - IAM
+  GuardDutyRemediationIAMLambda:
+    DependsOn:
+      - GuardDutyRemediationLambdaIAMRole
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: "index.handler"
+      Role:
+        Fn::GetAtt:
+          - "GuardDutyRemediationLambdaIAMRole"
+          - "Arn"
+      Code:
+        ZipFile: |
+          from __future__ import print_function
+          from botocore.exceptions import ClientError
+          import boto3
+          import json
+          import os
+
+          def handler(event, context):
+            try:
+              iam = boto3.client('iam')
+              response = iam.update_account_password_policy(
+                            AllowUsersToChangePassword=True,
+                            HardExpiry=True,
+                            MaxPasswordAge=90 ,
+                            MinimumPasswordLength=14,
+                            PasswordReusePrevention=24,
+                            RequireLowercaseCharacters=True,
+                            RequireNumbers=True,
+                            RequireSymbols=True,
+                            RequireUppercaseCharacters=True)
+
+            except ClientError as e:
+              print(e)
+            return response
+      Runtime: "python3.7"
+      Timeout: "35"
+
+  # Remediation Lambda - IAM Role
+  GuardDutyRemediationLambdaIAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/IAMFullAccess
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+# -----------------------------------------------------------------------------------------------------------------------
+# EC2 Set up
+# Provisions EC2 instances in the relevant subnets and associated security groups for VPC1 and VPC3 
+# with ssh and icmp access
+# User Data section is self contained to generate malicious access
+# .......................................................................................................................
+
+  EIPEC2VPC3:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref EC2VPC3
+      Domain: vpc
+
+  EC2VPC1: 
+    Type: "AWS::EC2::Instance"
+    DependsOn:
+      - SGEC2VPC1
+      - EIPEC2VPC3
+      - EC2VPC1InstanceProfile
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMALINUX] # Dynamic mapping + Pseudo Parameter
+      InstanceType: t2.micro
+      IamInstanceProfile: !Ref EC2VPC1InstanceProfile
+      KeyName: !Ref KeyName
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet: 
+            - Ref: SGEC2VPC1
+          SubnetId: !ImportValue subnetvpc1
+      UserData:
+        Fn::Base64: !Sub 
+          - |
+            #!/bin/bash -ex
+
+            # Start SSM Agent
+            sudo yum install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm
+
+            # Install pre-reqs
+            export PATH=$PATH:/usr/local/bin:/usr/sbin:/root/.local/bin
+            echo 'export PATH=/root/.local/bin:/usr/sbin:$PATH' >> /home/ec2-user/.profile
+            sudo yum update -y
+            sudo yum install -y nmap git python python2-pip python-argparse gcc gcc-c++ glib2-devel
+
+            # Create findings file and generate finding
+            touch /home/ec2-user/gd-portscan.sh
+            cat <<EOF >> /home/ec2-user/gd-portscan.sh
+            #!/bin/bash
+            for j in {1..10} 
+            do
+              sudo nmap -sT ${IP}
+            done
+            EOF
+
+            sudo chmod +x /home/ec2-user/gd-portscan.sh
+            ./gd-portscan.sh
+          -
+            Profile:
+              !Ref EC2VPC1InstanceProfile
+            Region:
+              !Ref "AWS::Region"
+            IP:
+              !Ref EIPEC2VPC3
+
+  EC2VPC3: 
+    Type: "AWS::EC2::Instance"
+    DependsOn: 
+      - SGEC2VPC3
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMALINUX] # Dynamic mapping + Pseudo Parameter
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet: 
+            - Ref: SGEC2VPC3
+          SubnetId: !ImportValue subnetvpc3
+     
+  EC2VPC1InstanceProfile:
+    DependsOn:
+      - EC2VPC1Role
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref EC2VPC1Role 
+
+
+  EC2VPC1Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+      Policies:
+        -
+          PolicyName: GuardDutyPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - guardduty:GetDetector
+                  - guardduty:ListDetectors
+                  - guardduty:CreateThreatIntelSet
+                  - guardduty:UpdateThreatIntelSet
+                Resource: '*'
+              -
+                Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:DescribeParameters
+                  - ssm:GetParameters
+                  - ssm:DeleteParameter
+                Resource: '*'
+              -
+                Effect: Allow
+                Action:
+                  - iam:*
+                Resource: '*'
+              -
+                Effect: Allow
+                Action:
+                  - dynamodb:*
+                Resource: '*'
+              -
+                Effect: Allow
+                Action: s3:*
+                Resource: '*'
+              -
+                Effect: Allow
+                Action:
+                  - iam:PutRolePolicy
+                Resource:
+                  Fn::Join:
+                    - ':'
+                    - ["arn:aws:iam:",!Ref "AWS::AccountId", "role/aws-service-role/guardduty.amazonaws.com/*"]
+
+
+  SGEC2VPC1:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: !Join ["", ["Stack", "-", !Ref "AWS::StackId", "-", "VPC1"]]
+      VpcId: !ImportValue vpc1id
+      SecurityGroupIngress:
+        -
+          CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          ToPort: 22
+          FromPort: 22
+        -
+          CidrIp: 0.0.0.0/0
+          IpProtocol: icmp
+          ToPort: "-1"
+          FromPort: "-1"
+      SecurityGroupEgress:
+        -
+          CidrIp: 0.0.0.0/0
+          ToPort: "-1"
+          IpProtocol: "-1"
+
+  SGEC2VPC1LockDown:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: !Join ["", ["Stack", "-", !Ref "AWS::StackId", "-", "VPC1"]]
+      VpcId: !ImportValue vpc1id
+      SecurityGroupIngress:
+        -
+          CidrIp: 10.10.0.0/16
+          IpProtocol: icmp
+          ToPort: "-1"
+          FromPort: "-1"
+      SecurityGroupEgress:
+        -
+          CidrIp: 10.10.0.0/16
+          FromPort: "-1"
+          ToPort: "-1"
+          IpProtocol: icmp
+
+  SGEC2VPC3:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: !Join ["", ["Stack", "-", !Ref "AWS::StackId", "-", "VPC3"]]
+      VpcId: !ImportValue vpc3id
+      SecurityGroupIngress:
+        -
+          CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          ToPort: 22
+          FromPort: 22
+        -
+          CidrIp: 0.0.0.0/0
+          IpProtocol: icmp
+          ToPort: "-1"
+          FromPort: "-1"
+      SecurityGroupEgress:
+        -
+          CidrIp: 0.0.0.0/0
+          ToPort: "-1"
+          IpProtocol: "-1"
