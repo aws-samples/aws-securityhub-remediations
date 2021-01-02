@@ -1,0 +1,292 @@
+
+Description: AWS Security Hub FSBP Remediations Systems Manager Automation Documents and Prerequisites
+AWSTemplateFormatVersion: "2010-09-09"
+
+# @author Kanishk Mahajan
+#
+## License:
+## This code is made available under the MIT-0 license. See the LICENSE file.
+
+Outputs:
+  AutomationAssumeRoleArn:
+    Description: Arn for AutomationAssumeRole
+    Value: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AutomationAssumeRole}'
+    Export: # added to export
+      Name: FSBP-AutomationAssumeRoleArn
+
+  SSMInstanceProfileRoleArn:
+    Description: Arn for SSMInstanceProfileRole
+    Value: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${SSMInstanceProfileRole}'
+    Export: # added to export
+      Name: FSBP-SSMInstanceProfileRoleArn
+
+  KMSKeyArn:
+    Description: Arn for KMS CMK
+    Value: !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/${KmsKeyId}"
+    Export: # added to export
+      Name: FSBP-KMSKeyArn
+
+Resources:
+
+# SSM Automation Role
+  AutomationAssumeRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub fsbp-automationassumerole-${AWS::Region}
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ssm.amazonaws.com
+                - events.amazonaws.com
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess"
+
+
+# SSM Instance Profile Role
+  SSMInstanceProfileRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub fsbp-ssminstanceprofilerole-${AWS::Region}
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+
+# KMS key 
+  KmsKeyId:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      EnableKeyRotation: true
+      Enabled: true
+      KeyUsage: ENCRYPT_DECRYPT
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: FSBPKMS
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: 'kms:*'
+            Resource: '*'
+
+  KmsKeyIdAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/FSBP-CMK
+      TargetKeyId:
+        Fn::GetAtt:
+          - KmsKeyId
+          - Arn
+
+# [IAM.3]
+  FSBPIAM3Automation:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Name: FSBPIAM3Automation
+      Content:
+        schemaVersion: '0.3'
+        assumeRole: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AutomationAssumeRole}"
+        parameters:
+          username:
+            type: String
+            default: 'fsbpadmin'
+          AutomationAssumeRole:
+            type: String
+            default: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AutomationAssumeRole}"
+        mainSteps:
+          - name: rotateiam90days
+            action: 'aws:executeScript'
+            inputs:
+              Runtime: python3.6
+              Handler: rotateiam90days_handler
+              Script: |
+                def rotateiam90days_handler(events, context):
+                  import boto3
+                  import datetime
+                  import json
+                  import os
+                  iam = boto3.client('iam')
+                  securityhub = boto3.client('securityhub')
+                  iam_resource = boto3.resource('iam')
+                  try:
+                     username = events['username']
+                     todaysDatetime = datetime.datetime.now(datetime.timezone.utc)
+                     paginator = iam.get_paginator('list_access_keys')
+                     for response in paginator.paginate(UserName=username):
+                         for keyMetadata in response['AccessKeyMetadata']:
+                             accessKeyId = str(keyMetadata['AccessKeyId'])
+                             keyAgeFinder = todaysDatetime - keyMetadata['CreateDate']
+                             if keyAgeFinder <= datetime.timedelta(days=90):
+                                 print("Access key: " + accessKeyId + " is compliant")
+                             else:
+                               print("Access key over 90 days old found!")
+                               access_key = iam_resource.AccessKey(username, accessKeyId)
+                               access_key.deactivate()
+                  except Exception as e:
+                     print(e)
+                     raise
+              InputPayload:
+                AutomationAssumeRole: '{{AutomationAssumeRole}}'
+                username: '{{username}}'
+
+
+#[RDS.3]
+  FSBPRDS3Automation:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Name: FSBPRDS3Automation
+      Content:
+        schemaVersion: '0.3'
+        assumeRole: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AutomationAssumeRole}"
+        parameters:
+          AutomationAssumeRole:
+            type: String
+            default: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AutomationAssumeRole}"
+          dbinstanceId:
+            type: String     
+          kmskeyArn:
+            type: String      
+        mainSteps:
+          - name: EncryptRDSDBInstance
+            action: 'aws:executeScript'
+            inputs:
+              Runtime: python3.6
+              Handler: script_handler
+              Script: "def script_handler(events, context):\r\n  import boto3\r\n  import time\r\n  client = boto3.client('rds')\r\n  dbinstanceId = events['dbinstanceId']\r\n  kmskeyArn = events['kmskeyArn']\r\n    \r\n  response_snapshot = client.create_db_snapshot(\r\n      DBSnapshotIdentifier=\"fsbp-snapshot-\" + dbinstanceId,\r\n      DBInstanceIdentifier=dbinstanceId\r\n  )\r\n    \r\n  response_snapshotA = client.get_waiter('db_snapshot_available').wait(\r\n      DBSnapshotIdentifier='fsbp-snapshot-' + dbinstanceId,\r\n      DBInstanceIdentifier=dbinstanceId\r\n  )\r\n\r\n    \r\n  response_snapshotCopy = client.copy_db_snapshot(\r\n      SourceDBSnapshotIdentifier=\"fsbp-snapshot-\" + dbinstanceId,\r\n      TargetDBSnapshotIdentifier=\"fsbp-snapshot-encrypted-\" + dbinstanceId,\r\n      KmsKeyId=kmskeyArn,\r\n      CopyTags=True\r\n  )\r\n                \r\n  response_snapshotB = client.get_waiter('db_snapshot_available').wait(\r\n      DBSnapshotIdentifier='fsbp-snapshot-encrypted-' + dbinstanceId,\r\n      DBInstanceIdentifier=dbinstanceId\r\n  )\r\n\r\n  response_restore = client.restore_db_instance_from_db_snapshot(\r\n      DBInstanceIdentifier='fsbp-encrypted-' + dbinstanceId,\r\n      DBSnapshotIdentifier='fsbp-snapshot-encrypted-' + dbinstanceId\r\n  )\r\n\r\n  response_snapshotC = client.get_waiter('db_instance_available').wait(\r\n      DBInstanceIdentifier='fsbp-encrypted-' + dbinstanceId\r\n  )\r\n\r\n  response_delete1 =  client.delete_db_snapshot(\r\n      DBSnapshotIdentifier='fsbp-snapshot-' + dbinstanceId\r\n  )\r\n                \r\n  response_delete2 = client.get_waiter('db_snapshot_deleted').wait(\r\n      DBSnapshotIdentifier='fsbp-snapshot-' + dbinstanceId,\r\n      WaiterConfig={\r\n           'Delay': 5,\r\n           'MaxAttempts': 30\r\n      }\r\n  )\r\n\r\n  response_delete3 = client.delete_db_instance(\r\n      DBInstanceIdentifier=dbinstanceId,\r\n      SkipFinalSnapshot=True\r\n  )\r\n                \r\n  response_wait = client.get_waiter('db_instance_deleted').wait(\r\n      DBInstanceIdentifier=dbinstanceId\r\n  )\r\n                \r\n  response_newinstance = client.modify_db_instance( \r\n      DBInstanceIdentifier='fsbp-encrypted-' + dbinstanceId,\r\n      ApplyImmediately=True, \r\n      NewDBInstanceIdentifier=dbinstanceId\r\n  )\r\n                \r\n  time.sleep(60)\r\n\r\n  response_final = client.get_waiter('db_instance_available').wait(\r\n      DBInstanceIdentifier=dbinstanceId\r\n  )\r\n  \r\n"
+              InputPayload:
+                AutomationAssumeRole: '{{AutomationAssumeRole}}'
+                dbinstanceId: '{{dbinstanceId}}'
+                kmskeyArn: '{{kmskeyArn}}'
+
+#[EC2.3] 
+  FSBPEC23Automation:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Name: FSBPEC23Automation
+      Content:
+        schemaVersion: '0.3'
+        assumeRole: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AutomationAssumeRole}"
+        parameters:
+          AutomationAssumeRole:
+            type: String
+            default: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AutomationAssumeRole}"
+          ebsvolumeId:
+            type: String   
+          sourceregion:
+            type: String  
+          kmskeyArn:
+            type: String 
+        mainSteps:
+          - name: EncryptEBSVolume
+            action: 'aws:executeScript'
+            inputs:
+              Runtime: python3.6
+              Handler: script_handler
+              Script: "def script_handler(events, context):\r\n    # TODO implement\r\n    import json\r\n    import boto3\r\n    \r\n    client = boto3.client('ec2')\r\n    ebsvolumeId = events['ebsvolumeId']\r\n    kmskeyArn = events['kmskeyArn']\r\n    sourceregion = events['sourceregion']\r\n    \r\n    print('0. Describe Volume')\r\n    \r\n    response_volume = client.describe_volumes(\r\n        VolumeIds=[\r\n        ebsvolumeId\r\n        ]   \r\n    )\r\n    instanceid = response_volume['Volumes'][0]['Attachments'][0]['InstanceId']\r\n    size= response_volume['Volumes'][0]['Size']\r\n    availabilityzone = response_volume['Volumes'][0]['AvailabilityZone']\r\n    \r\n    response_snapshot = client.create_snapshot(\r\n        Description='New FSBP snapshot',\r\n        VolumeId=ebsvolumeId\r\n    )\r\n    \r\n    snapshotid = response_snapshot['SnapshotId']\r\n    \r\n    response_snapshotA = client.get_waiter('snapshot_completed').wait(\r\n        SnapshotIds=[snapshotid]\r\n    )\r\n\r\n    print('2. Copy and Encrypt. Creating encrypted snapshot from unencrypted copy')\r\n    \r\n    response_snapshotCopy = client.copy_snapshot(\r\n        Description='New FSBP Encrypted snapshot.',\r\n        DestinationRegion=sourceregion,\r\n        SourceRegion=sourceregion,\r\n        SourceSnapshotId=snapshotid,\r\n        KmsKeyId=kmskeyArn,\r\n        Encrypted=True\r\n    )\r\n    \r\n    snapshotencryptedId = response_snapshot['SnapshotId']\r\n    \r\n    response_snapshotB = client.get_waiter('snapshot_completed').wait(\r\n        SnapshotIds=[snapshotencryptedId]\r\n    )\r\n    \r\n    print('3. Create volume from encrypted snapshot')\r\n    \r\n    response_volume_encrypted = client.create_volume(\r\n        AvailabilityZone=availabilityzone,\r\n        Size=size,\r\n        VolumeType='gp2',\r\n        KmsKeyId=kmskeyArn,\r\n        Encrypted=True\r\n    )\r\n\r\n    encryptedVolumeId = response_volume_encrypted['VolumeId']\r\n    \r\n    response_snapshotC = client.get_waiter('volume_available').wait(\r\n        VolumeIds=[encryptedVolumeId]\r\n    )\r\n\r\n    print('4. Stop original instance or terminate original instance if instance in asg')\r\n    \r\n    asgclient = boto3.client('autoscaling')\r\n    \r\n    response_asg = asgclient.describe_auto_scaling_instances(\r\n        InstanceIds=[\r\n        instanceid\r\n        ]\r\n    )\r\n    \r\n    if not response_asg['AutoScalingInstances']:\r\n        response_terminateinstance = client.terminate_instances(\r\n            InstanceIds=[\r\n            instanceid\r\n            ]\r\n        )\r\n    else:\r\n         response_stopinstance = client.stop_instances(\r\n            InstanceIds=[\r\n            instanceid\r\n            ]\r\n        )\r\n        \r\n         response_instanceA = client.get_waiter('instance_stopped').wait(\r\n            InstanceIds=[instanceid]\r\n        )\r\n    \r\n         print('5. Detach original volume')\r\n    \r\n         response_detach_volume = client.detach_volume(\r\n            VolumeId=ebsvolumeId\r\n        )\r\n\r\n         response_snapshotC = client.get_waiter('volume_available').wait(\r\n            VolumeIds=[ebsvolumeId]\r\n        )\r\n    \r\n         print('6. Delete original volume')\r\n    \r\n         response = client.delete_volume(\r\n            VolumeId=ebsvolumeId\r\n        )\r\n    \r\n         response_volumeA = client.get_waiter('volume_deleted').wait(\r\n            VolumeIds=[ebsvolumeId]\r\n        )\r\n    \r\n    print('7. Delete original snapshot')\r\n    \r\n    response = client.delete_snapshot(\r\n        SnapshotId=snapshotid\r\n    )"
+              InputPayload:
+                AutomationAssumeRole: '{{AutomationAssumeRole}}'
+                ebsvolumeId: '{{ebsvolumeId}}'
+                sourceregion: '{{sourceregion}}'
+                kmskeyArn: '{{kmskeyArn}}'
+
+
+#[GuardDuty.1]
+  FSBPGuardDuty1Automation:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Name: FSBPGuardDuty1Automation
+      Content:
+        schemaVersion: '0.3'
+        assumeRole: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AutomationAssumeRole}"
+        parameters:
+          AutomationAssumeRole:
+            type: String
+            default: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AutomationAssumeRole}"   
+          findingpublishingfrequency:
+            type: String    
+        mainSteps:
+          - name: EnableGuardDuty
+            action: 'aws:executeScript'
+            inputs:
+              Runtime: python3.7
+              Handler: script_handler
+              Script: "def script_handler(events, context):\r\n  import boto3\r\n  client = boto3.client('guardduty')\r\n  findingpublishingfrequency= events['findingpublishingfrequency']\r\n\r\n  response = client.create_detector(\r\n      Enable=True,\r\n      FindingPublishingFrequency=findingpublishingfrequency\r\n  )\r\n"
+              InputPayload:
+                AutomationAssumeRole: '{{AutomationAssumeRole}}'
+                functionname: '{{findingpublishingfrequency}}'
+
+#[Lambda.2]
+  FSBPLambda2Automation:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Name: FSBPLambda2Automation
+      Content:
+        schemaVersion: '0.3'
+        assumeRole: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AutomationAssumeRole}"
+        parameters:
+          AutomationAssumeRole:
+            type: String
+            default: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AutomationAssumeRole}"
+          accountID:
+            type: String    
+          functionname:
+            type: String    
+        mainSteps:
+          - name: LatestRuntime
+            action: 'aws:executeScript'
+            inputs:
+              Runtime: python3.7
+              Handler: script_handler
+              Script: "def script_handler(events, context):\r\n  import boto3\r\n  client = boto3.client('lambda')\r\n  functionname = events['functionname']\r\n    \r\n  response = client.get_function_configuration(\r\n      FunctionName=functionname\r\n  )\r\n  runtime = response['Runtime']\r\n    \r\n  if 'python' in runtime:\r\n      runtime = 'python3.8'\r\n  if 'node' in runtime:\r\n      runtime = 'nodejs12.x'\r\n  if 'java' in runtime:\r\n      runtime = 'java11'\r\n  if 'dotnet' in runtime:\r\n      runtime = 'dotnetcore3.1'\r\n  if 'ruby' in runtime:\r\n      runtime = 'ruby2.7'\r\n  if 'go' in runtime:\r\n      runtime = 'go1.x'\r\n        \r\n  response = client.update_function_configuration(\r\n      FunctionName=functionname,\r\n      Runtime=runtime\r\n  )\r\n  \r\n\r\n"
+              InputPayload:
+                AutomationAssumeRole: '{{AutomationAssumeRole}}'
+                functionname: '{{functionname}}'
+
+#[Lambda.1]
+  FSBPLambda1Automation:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Name: FSBPLambda1Automation
+      Content:
+        schemaVersion: '0.3'
+        assumeRole: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AutomationAssumeRole}"
+        parameters:
+          AutomationAssumeRole:
+            type: String
+            default: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${AutomationAssumeRole}"
+          accountID:
+            type: String    
+          functionname:
+            type: String    
+        mainSteps:
+          - name: RestrictLambda
+            action: 'aws:executeScript'
+            inputs:
+              Runtime: python3.6
+              Handler: script_handler
+              Script: "def script_handler(events, context):\r\n  import boto3\r\n  import json\r\n  \r\n  client = boto3.client('lambda')\r\n  functionname = events['functionname']\r\n  accountID = events['accountID']\r\n  response = client.get_policy(FunctionName=functionname)\r\n  policy = response['Policy']\r\n  policy_json = json.loads(policy)\r\n  statements = policy_json['Statement']\r\n  \r\n  for statement in statements:\r\n      Principal = str(statement['Principal']).replace(\"{'Service': '\",\"\")[:-2]\r\n      Action = statement['Action']\r\n      Resource = statement['Resource']\r\n      StatementId = statement ['Sid']\r\n      NewStatementId = \"New\" + StatementId\r\n        \r\n      response_old = client.remove_permission(\r\n                   FunctionName=functionname,\r\n                   StatementId=StatementId\r\n      )\r\n\r\n      response = client.add_permission(\r\n                  FunctionName=functionname,\r\n                  StatementId=NewStatementId,\r\n                  Action=Action,\r\n                  Principal=Principal,\r\n                  SourceAccount= accountID\r\n      )"
+              InputPayload:
+                AutomationAssumeRole: '{{AutomationAssumeRole}}'
+                accountID: '{{accountID}}'
+                functionname: '{{functionname}}'
