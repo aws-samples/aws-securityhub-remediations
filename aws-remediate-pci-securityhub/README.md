@@ -20,7 +20,6 @@ This implementation is based on the following solution approach:
 * The Lambda function processes the finding using the standard findings format provided by Security Hub - AWS Security Finding Format (ASFF) and invokes the corresponding AWS Systems Manager Automation Document with the input from the ASFF finding
 
 
-
 ## Solution Design
 
 ![](images/arch-diagram.png)
