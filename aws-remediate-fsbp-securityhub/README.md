@@ -65,7 +65,7 @@ Additionally coverage for remediations for the following Foundational Security B
 * [RDS.2] RDS DB instances should prohibit public access, determined by the PubliclyAccessible configuration
 * [SSM.2] Amazon EC2 instances managed by Systems Manager should have a patch compliance status of COMPLIANT after a patch installation 
 
-## Author
+## @kmmahaj
 
-Kanishk Mahajan; kmmahaj@amazon.com
+
 
