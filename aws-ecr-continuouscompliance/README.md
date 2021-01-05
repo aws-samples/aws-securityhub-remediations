@@ -39,5 +39,4 @@
 	* With the relevant finding selected in the AWS Security Hub Findings panel, select Actions from the top of the panel and click on the ‘ECR1’ action.
 	* Navigate to  the AWS ECR console, select the Repository that contains the vulnerable image and validate the Deny permissions policy provisioned by the Security Hub remediation action by selecting Permissions in the left panel
 
-## Author
-Kanishk Mahajan
+## @kmmahaj
