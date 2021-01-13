@@ -81,8 +81,8 @@ Resources:
                   numMedium = findingsevcounts['MEDIUM']
                           
               # send finding to Security Hub
-              severity = ""
-              title = ""
+              severity = "LOW"
+              title = "ECR Finding"
               ECRComplianceRating = 'PASSED'
               if numCritical:
                   severity = "CRITICAL"
