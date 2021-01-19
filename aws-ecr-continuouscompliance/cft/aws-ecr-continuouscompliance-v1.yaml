@@ -75,24 +75,30 @@ Resources:
               findingsevcounts = eventDetails['finding-severity-counts']
               numCritical = 0
               numMedium = 0
+              numHigh = 0
               if findingsevcounts.get('CRITICAL'):
                   numCritical = findingsevcounts['CRITICAL']
               if findingsevcounts.get('MEDIUM'):
                   numMedium = findingsevcounts['MEDIUM']
+              if findingsevcounts.get('HIGH'):
+                  numHigh = findingsevcounts['HIGH']
                           
               # send finding to Security Hub
               severity = "LOW"
               title = "ECR Finding"
               ECRComplianceRating = 'PASSED'
+              if numHigh:
+                  severity = "HIGH"
+                  title = "High ECR Vulnerability"
+                  ECRComplianceRating = 'FAILED'
               if numCritical:
                   severity = "CRITICAL"
                   title = "Critical ECR Vulnerability"
                   ECRComplianceRating = 'FAILED'
-              else:
-                  if numMedium:
-                      severity = "MEDIUM"
-                      title = "Medium ECR Vulnerability"
-                      ECRComplianceRating = 'FAILED'
+              if numMedium:
+                  severity = "MEDIUM"
+                  title = "Medium ECR Vulnerability"
+                  ECRComplianceRating = 'FAILED'
 
               # ISO Time
               iso8061Time = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc).isoformat()
