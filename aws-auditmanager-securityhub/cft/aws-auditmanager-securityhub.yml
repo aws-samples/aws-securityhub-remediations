@@ -19,13 +19,6 @@ Parameters:
     MinLength: '1'
     MaxLength: '255'
 
-  AuditOwnerRoleArn:
-    Description: ARN for IAM Audit Owner in your account
-    Type: String
-    Default: 'arn:aws:iam::<AccountId>:role/Administrator'
-    MinLength: '1'
-    MaxLength: '255'
-
 Resources:
 
 #---------------------------------------------------------------------------------------------------
@@ -135,6 +128,6 @@ Resources:
                 Effect: Allow
                 Resource: '*'
       ManagedPolicyArns:
-        - !Ref AuditOwnerRoleArn
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AWSAuditManagerAdministratorAccess'
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
 

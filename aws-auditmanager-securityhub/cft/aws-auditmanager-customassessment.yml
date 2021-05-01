@@ -20,10 +20,10 @@ Parameters:
     MinLength: '1'
     MaxLength: '255'
 
-  AuditOwnerRoleArn:
-    Description: ARN for IAM Audit Owner in your account
+  AuditOwnerArn:
+    Description: ARN for IAM Audit Owner in your account.
     Type: String
-    Default: 'arn:aws:iam::<AccountId>:role/Administrator'
+    Default: 'arn:aws:iam::341476298946:user/AuditManagerAdmin'
     MinLength: '1'
     MaxLength: '255'
 
@@ -44,7 +44,7 @@ Resources:
       FrameworkId: '{{resolve:ssm:CustomSecurityHubFrameworkID:1}}'
       Name: 'CustomSecurityHubAssessment'
       Roles: 
-        - 'RoleArn': !Ref AuditOwnerRoleArn
+        - 'RoleArn': !Ref AuditOwnerArn
           'RoleType': 'PROCESS_OWNER'
       Scope: 
          AwsAccounts:
