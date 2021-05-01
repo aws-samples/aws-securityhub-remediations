@@ -16,7 +16,7 @@ Parameters:
   AssessmentDestination:
     Description: S3 Bucket and folder that stores the Custom Audit Manager Assessment Destination
     Type: String
-    Default: 's3://s3-auditmanager-<AccountId>-<Region>/evidences/'
+    Default: 's3://s3-customauditmanagerframework-<AccountId>-<Region>/evidences/'
     MinLength: '1'
     MaxLength: '255'
 
