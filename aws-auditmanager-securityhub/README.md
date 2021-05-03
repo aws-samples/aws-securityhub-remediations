@@ -14,24 +14,33 @@ Creates a custom AWS Audit Manager framework that is comprised of custom AWS Aud
 
 **Prerequisites**
 
-1. Ensure that AWS Security Hub and AWS Audit Manager are enabled in your account.
+1. Ensure that AWS Security Hub is enabled in your account.
 
-2. Create an Amazon S3 bucket with the following name: s3-customauditmanagerframework-AccountId-Region where the AccountId is your AWS Account ID and Region is the AWS Region where you have deployed this template. In this bucket, create a folder named CustomAuditManagerFramework_Lambda and upload the CustomAuditManagerFramework_Lambda.zip (it's in the lambda folder) file there.	
+2. Follow the steps to set up AWS Audit Manager.
 
-3. Audit Manager works with the Boto3 1.7 libraries. AWS Lambda doesn't ship with Boto3 1.7 by default. This implementation provides that version of Boto3 as a Lambda Layer. Upload the auditmanagerlayer.zip (it's in the layer folder) to the root folder of the S3 bucket created in step 2. 
+3. Create an Amazon S3 bucket with the following name: s3-customauditmanagerframework-AccountId-Region where the AccountId is your AWS Account ID and Region is the AWS Region where you have deployed this template. In this bucket, create a folder named CustomAuditManagerFramework_Lambda and upload the CustomAuditManagerFramework_Lambda.zip (it's in the lambda folder) file there.	
 
-3. Create an Amazon S3 bucket with the following name: s3-auditmanager-AccountId-Region where the AccountId is your AWS Account ID and Region is the AWS Region where you have deployed this template. In this bucket, create a folder (for e.g. 'evidences). This is the Amazon S3 bucket and folder in which AWS Audit Manager will save your assessment reports. 
+4. Audit Manager works with the Boto3 1.7 libraries. AWS Lambda doesn't ship with Boto3 1.7 by default. This implementation provides that version of Boto3 as a Lambda Layer. Upload the auditmanagerlayer.zip (it's in the layer folder) to the root folder of the S3 bucket created in step 2. 
 
-4. Create an IAM user/role with Audit owner permissions. https://docs.aws.amazon.com/audit-manager/latest/userguide/security_iam_service-with-iam.html#security_iam_service-with-iam-id-based-policies
+5. If you have already configured an assessment reports destination in your Audit Manager settings then you can skip this step. Otherwise, create a folder (for e.g. 'evidences) in the S3 bucket in step 2. Your assessment reports destination will be the S3 URI for e.g. s3://s3-customauditmanagerframework-AccountId-Region/evidences/. AWS Audit Manager will save your assessment reports to this bucket.
+
+6. Create an IAM user with Audit owner permissions. https://docs.aws.amazon.com/audit-manager/latest/userguide/security_iam_service-with-iam.html#security_iam_service-with-iam-id-based-policies
 
 
 **Setup** 
 
 The solution automates the initial setup and deployment in two steps:
 
-1.	Launch the **aws-auditmanager-securityhub.yml** template. For parameters - 1) Provide the name of the S3 bucket and folder (from step 2 in the prerequisites) that contains the source CustomAuditManagerFramework_Lambda.zip 
+1.	Launch the **aws-auditmanager-securityhub.yml** template. For parameters - 1) Provide the name of the S3 bucket and folder (from step 3 in the prerequisites) that contains the source CustomAuditManagerFramework_Lambda.zip 
 
-2. Launch the **aws-auditmanager-customassessment.yml** template. Provide the name of the S3 bucket and folder (from step 3 in the prerequisites) that is the assessment destination as a parameter and 2) Provide the ARN of the Audit owner IAM user/role
+2. Launch the **aws-auditmanager-customassessment.yml** template. Provide the s3 uri (from step 5 in the prerequisites) that is the assessment destination as a parameter and 2) Provide the ARN of the Audit owner IAM user from step 6 in the pre-requisites
+
+**Cleanup**
+
+1. Delete the CloudFormation stacks in sequence- 1) aws-auditmanager-customassessment.yml and then 2) aws-auditmanager-securityhub.yml
+2. Delete the custom framework  as well as the custom controls created in Audit Manager (you can do this from the console)
+3. Delete the Audit Manager framework ID from the SSM parameter store
+
 
 
 
