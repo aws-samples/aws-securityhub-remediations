@@ -1,0 +1,972 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Template will create CW Contributor Insight rules and a dashboard.
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "Rule Configuration"
+        Parameters:
+          - ContributorInsightRuleState
+          - CloudWatchLogGroup
+    ParameterLabels:
+      ContributorInsightRuleState:
+        default: "Contributor Insight Rule State"
+      CloudWatchLogGroup:
+        default: "CloudWatch Log group consuming CloudTrail logs"
+Parameters:
+
+ # give the customer the option to set the Contributor Insight Rules to be disabled on creation
+  ContributorInsightRuleState:
+      Type: String
+      Description: Select to enable or disable the Contributor Insight Rules on Creation.
+      Default: ENABLED
+      AllowedValues:
+        - ENABLED
+        - DISABLED
+
+  CloudWatchLogGroup:
+      Type: String
+      Description: >-
+        Select the Log Group that is consuming logs from your CloudTrail
+      Default: CloudTrail/DefaultLogGroup
+
+Resources:
+
+    # CloudWatch Insight Rules - 3.1 Monitoring for unauthorized API calls
+    UnauthorizedAPICallsInsightRule:
+      Type: AWS::CloudWatch::InsightRule
+      Properties:
+        RuleBody: !Sub |
+          {
+              "Schema": {
+                  "Name": "CloudWatchLogRule",
+                  "Version": 1
+              },
+              "AggregateOn": "Count",
+              "Contribution": {
+                  "Filters": [
+                      {
+                          "In": [
+                              "AccessDenied",
+                              "UnauthorizedOperation"
+                          ],
+                          "Match": "$.errorCode"
+                      }
+                  ],
+                  "Keys": [
+                      "$.userIdentity.arn",
+                      "$.eventName"
+                  ]
+              },
+              "LogFormat": "JSON",
+              "LogGroupNames": [
+                  "${CloudWatchLogGroup}"
+              ]
+          }
+        RuleName: CIS-Unauthorized-API-Activity
+        RuleState: !Ref ContributorInsightRuleState
+
+    # CloudWatch Insight Rules -3.2 Monitoring AWS Console sign-in without MFA
+    ConsoleSigninWithoutMFAInsightRule:
+      Type: AWS::CloudWatch::InsightRule
+      Properties:
+        RuleBody: !Sub |
+          {
+              "Schema": {
+                  "Name": "CloudWatchLogRule",
+                  "Version": 1
+              },
+              "AggregateOn": "Count",
+              "Contribution": {
+                  "Filters": [
+                      {
+                          "In": [
+                              "ConsoleLogin"
+                          ],
+                          "Match": "$.eventName"
+                      },
+                      {
+                          "NotIn": [
+                              "Yes"
+                          ],
+                          "Match": "$.additionalEventData.MFAUsed"
+                      }
+                  ],
+                  "Keys": [
+                      "$.userIdentity.userName",
+                      "$.sourceIPAddress"
+                  ]
+              },
+              "LogFormat": "JSON",
+              "LogGroupNames": [
+                  "${CloudWatchLogGroup}"
+              ]
+          }
+        RuleName: CIS-Console-Signin-Without-MFA
+        RuleState: !Ref ContributorInsightRuleState
+
+    # CloudWatch Insight Rules - 3.3 Monitoring Root Activity
+    RootActivityInsightRule:
+      Type: AWS::CloudWatch::InsightRule
+      Properties:
+        RuleBody: !Sub |
+          {
+              "Schema": {
+                  "Name": "CloudWatchLogRule",
+                  "Version": 1
+              },
+              "AggregateOn": "Count",
+              "Contribution": {
+                  "Filters": [
+                      {
+                          "In": [
+                              "Root"
+                          ],
+                          "Match": "$.userIdentity.type"
+                      },
+                      {
+                          "IsPresent": false,
+                          "Match": "$.userIdentity.invokedBy"
+                      },
+                      {
+                          "NotIn": [
+                              "AwsServiceEvent"
+                          ],
+                          "Match": "$.eventType"
+                      }
+                  ],
+                  "Keys": [
+                      "$.userIdentity.type",
+                      "$.eventName"
+                  ]
+              },
+              "LogFormat": "JSON",
+              "LogGroupNames": [
+                  "${CloudWatchLogGroup}"
+              ]
+          }
+        RuleName: CIS-Root-Activity
+        RuleState: !Ref ContributorInsightRuleState
+
+    # CloudWatch Insight Rules - 3.5 CloudTrail Configuration Changes
+    CloudTrailConfigurationChangesInsightRule:
+      Type: AWS::CloudWatch::InsightRule
+      Properties:
+        RuleBody: !Sub |
+          {
+              "Schema": {
+                  "Name": "CloudWatchLogRule",
+                  "Version": 1
+              },
+              "AggregateOn": "Count",
+              "Contribution": {
+                  "Filters": [
+                      {
+                          "In": [
+                              "CreateTrail",
+                              "UpdateTrail",
+                              "DeleteTrail",
+                              "StartLogging",
+                              "StopLogging"
+                          ],
+                          "Match": "$.eventName"
+                      }
+                  ],
+                  "Keys": [
+                      "$.userIdentity.sessionContext.sessionIssuer.arn",
+                      "$.sourceIPAddress"
+                  ]
+              },
+              "LogFormat": "JSON",
+              "LogGroupNames": [
+                  "${CloudWatchLogGroup}"
+              ]
+          }
+        RuleName: CIS-CloudTrail-Configuration-Changes
+        RuleState: !Ref ContributorInsightRuleState
+
+    # CloudWatch Insight Rules - 3.6 AWS Management Console Authentication Failures
+    ConsoleAuthenticationFailuresInsightRule:
+      Type: AWS::CloudWatch::InsightRule
+      Properties:
+        RuleBody: !Sub |
+          {
+              "Schema": {
+                  "Name": "CloudWatchLogRule",
+                  "Version": 1
+              },
+              "AggregateOn": "Count",
+              "Contribution": {
+                  "Filters": [
+                      {
+                          "In": [
+                              "ConsoleLogin"
+                          ],
+                          "Match": "$.eventName"
+                      },
+                      {
+                          "In": [
+                              "Failed authentication"
+                          ],
+                          "Match": "$.errorMessage"
+                      }
+                  ],
+                  "Keys": [
+                      "$.userIdentity.userName",
+                      "$.sourceIPAddress"
+                  ]
+              },
+              "LogFormat": "JSON",
+              "LogGroupNames": [
+                  "${CloudWatchLogGroup}"
+              ]
+          }
+        RuleName: CIS-Console-Authentication-Failures
+        RuleState: !Ref ContributorInsightRuleState
+
+    # CloudWatch Insight Rules - 3.7 Disabling or scheduled deletion of customer created CMKs
+    CMKInsightRule:
+      Type: AWS::CloudWatch::InsightRule
+      Properties:
+        RuleBody: !Sub |
+          {
+              "Schema": {
+                  "Name": "CloudWatchLogRule",
+                  "Version": 1
+              },
+              "AggregateOn": "Count",
+              "Contribution": {
+                  "Filters": [
+                      {
+                          "In": [
+                              "kms.amazonaws.com"
+                          ],
+                          "Match": "$.eventSource"
+                      },
+                      {
+                          "In": [
+                              "DisableKey",
+                              "ScheduleKeyDeletion"
+                          ],
+                          "Match": "$.eventName"
+                      }
+                  ],
+                  "Keys": [
+                      "$.userIdentity.arn",
+                      "$.sourceIPAddress"
+                  ]
+              },
+              "LogFormat": "JSON",
+              "LogGroupNames": [
+                  "${CloudWatchLogGroup}"
+              ]
+          }
+        RuleName: CIS-CMK-Deletion-Disabling
+        RuleState: !Ref ContributorInsightRuleState
+
+    # CloudWatch Insight Rules - 3.8 S3 Bucket Policy Changes
+    S3BucketPolicyChangesInsightRule:
+      Type: AWS::CloudWatch::InsightRule
+      Properties:
+        RuleBody: !Sub |
+          {
+              "Schema": {
+                  "Name": "CloudWatchLogRule",
+                  "Version": 1
+              },
+              "AggregateOn": "Count",
+              "Contribution": {
+                  "Filters": [
+                      {
+                          "In": [
+                              "s3.amazonaws.com"
+                          ],
+                          "Match": "$.eventSource"
+                      },
+                      {
+                          "In": [
+                              "PutBucketAcl",
+                              "PutBucketPolicy",
+                              "PutBucketCors",
+                              "PutBucketLifecycle",
+                              "PutBucketReplication",
+                              "DeleteBucketPolicy",
+                              "DeleteBucketCors",
+                              "DeleteBucketLifecycle",
+                              "DeleteBucketReplication"
+                          ],
+                          "Match": "$.eventName"
+                      }
+                  ],
+                  "Keys": [
+                      "$.userIdentity.sessionContext.sessionIssuer.arn",
+                      "$.sourceIPAddress"
+                  ]
+              },
+              "LogFormat": "JSON",
+              "LogGroupNames": [
+                  "${CloudWatchLogGroup}"
+              ]
+          }
+        RuleName: CIS-S3-Bucket-Policy-Changes
+        RuleState: !Ref ContributorInsightRuleState
+
+    # CloudWatch Insight Rules - 3.9 AWS Config Configuration Changes
+    AWSConfigConfigurationChangesInsightRule:
+      Type: AWS::CloudWatch::InsightRule
+      Properties:
+        RuleBody: !Sub |
+          {
+              "Schema": {
+                  "Name": "CloudWatchLogRule",
+                  "Version": 1
+              },
+              "AggregateOn": "Count",
+              "Contribution": {
+                  "Filters": [
+                      {
+                          "In": [
+                              "config.amazonaws.com"
+                          ],
+                          "Match": "$.eventSource"
+                      },
+                      {
+                          "In": [
+                              "StopConfigurationRecorder",
+                              "DeleteDeliveryChannel",
+                              "PutDeliveryChannel",
+                              "PutConfigurationRecorder"
+                          ],
+                          "Match": "$.eventName"
+                      }
+                  ],
+                  "Keys": [
+                      "$.userIdentity.arn",
+                      "$.sourceIPAddress"
+                  ]
+              },
+              "LogFormat": "JSON",
+              "LogGroupNames": [
+                  "${CloudWatchLogGroup}"
+              ]
+          }
+        RuleName: CIS-AWS-Config-Configuration-Changes
+        RuleState: !Ref ContributorInsightRuleState
+
+    # CloudWatch Insight Rules - 3.10 Security group Changes
+    SecurityGroupChangesInsightRule:
+      Type: AWS::CloudWatch::InsightRule
+      Properties:
+        RuleBody: !Sub |
+          {
+              "Schema": {
+                  "Name": "CloudWatchLogRule",
+                  "Version": 1
+              },
+              "AggregateOn": "Count",
+              "Contribution": {
+                  "Filters": [
+                      {
+                          "In": [
+                              "AuthorizeSecurityGroupIngress",
+                              "AuthorizeSecurityGroupEgress",
+                              "RevokeSecurityGroupIngress",
+                              "RevokeSecurityGroupEgress",
+                              "CreateSecurityGroup",
+                              "DeleteSecurityGroup"
+                          ],
+                          "Match": "$.eventName"
+                      }
+                  ],
+                  "Keys": [
+                      "$.userIdentity.sessionContext.sessionIssuer.arn",
+                      "$.sourceIPAddress"
+                  ]
+              },
+              "LogFormat": "JSON",
+              "LogGroupNames": [
+                  "${CloudWatchLogGroup}"
+              ]
+          }
+        RuleName: CIS-Security-Group-Changes
+        RuleState: !Ref ContributorInsightRuleState
+
+    # CloudWatch Insight Rules - 3.11 Network Access Control List Changes
+    NetworkACLChangesInsightRule:
+      Type: AWS::CloudWatch::InsightRule
+      Properties:
+        RuleBody: !Sub |
+          {
+              "Schema": {
+                  "Name": "CloudWatchLogRule",
+                  "Version": 1
+              },
+              "AggregateOn": "Count",
+              "Contribution": {
+                  "Filters": [
+                      {
+                          "In": [
+                              "CreateNetworkAcl",
+                              "CreateNetworkAclEntry",
+                              "DeleteNetworkAcl",
+                              "DeleteNetworkAclEntry",
+                              "ReplaceNetworkAclEntry",
+                              "ReplaceNetworkAclAssociation"
+                          ],
+                          "Match": "$.eventName"
+                      }
+                  ],
+                  "Keys": [
+                      "$.userIdentity.arn",
+                      "$.sourceIPAddress"
+                  ]
+              },
+              "LogFormat": "JSON",
+              "LogGroupNames": [
+                  "${CloudWatchLogGroup}"
+              ]
+          }
+        RuleName: CIS-Network-ACL-Changes
+        RuleState: !Ref ContributorInsightRuleState
+
+    # CloudWatch Insight Rules - 3.12 Network Gateway Changes
+    NetworkGatewayChangesInsightRule:
+      Type: AWS::CloudWatch::InsightRule
+      Properties:
+        RuleBody: !Sub |
+          {
+              "Schema": {
+                  "Name": "CloudWatchLogRule",
+                  "Version": 1
+              },
+              "AggregateOn": "Count",
+              "Contribution": {
+                  "Filters": [
+                      {
+                          "In": [
+                              "CreateCustomerGateway",
+                              "DeleteCustomerGateway",
+                              "AttachInternetGateway",
+                              "CreateInternetGateway",
+                              "DeleteInternetGateway",
+                              "DetachInternetGateway"
+                          ],
+                          "Match": "$.eventName"
+                      }
+                  ],
+                  "Keys": [
+                      "$.userIdentity.arn",
+                      "$.sourceIPAddress"
+                  ]
+              },
+              "LogFormat": "JSON",
+              "LogGroupNames": [
+                  "${CloudWatchLogGroup}"
+              ]
+          }
+        RuleName: CIS-Network-Gateway-Changes
+        RuleState: !Ref ContributorInsightRuleState
+
+    # CloudWatch Insight Rules - 3.13 Route Table Changes
+    RouteTableChangesInsightRule:
+      Type: AWS::CloudWatch::InsightRule
+      Properties:
+        RuleBody: !Sub |
+          {
+              "Schema": {
+                  "Name": "CloudWatchLogRule",
+                  "Version": 1
+              },
+              "AggregateOn": "Count",
+              "Contribution": {
+                  "Filters": [
+                      {
+                          "In": [
+                              "CreateRoute",
+                              "CreateRouteTable",
+                              "ReplaceRoute",
+                              "ReplaceRouteTableAssociation",
+                              "DeleteRouteTable",
+                              "DeleteRoute",
+                              "DisassociateRouteTable"
+                          ],
+                          "Match": "$.eventName"
+                      }
+                  ],
+                  "Keys": [
+                      "$.userIdentity.arn",
+                      "$.sourceIPAddress"
+                  ]
+              },
+              "LogFormat": "JSON",
+              "LogGroupNames": [
+                  "${CloudWatchLogGroup}"
+              ]
+          }
+        RuleName: CIS-Route-Table-Changes
+        RuleState: !Ref ContributorInsightRuleState
+
+    # CloudWatch Insight Rules - 3.14 VPC Changes
+    VPCChangesInsightRule:
+      Type: AWS::CloudWatch::InsightRule
+      Properties:
+        RuleBody: !Sub |
+          {
+              "Schema": {
+                  "Name": "CloudWatchLogRule",
+                  "Version": 1
+              },
+              "AggregateOn": "Count",
+              "Contribution": {
+                  "Filters": [
+                      {
+                          "StartsWith": [
+                              "CreateVpc",
+                              "DeleteVpc",
+                              "ModifyVpcAttribute",
+                              "AcceptVpcPeeringConnection",
+                              "RejectVpcPeeringConnection",
+                              "AttachClassicLinkVpc",
+                              "DetachClassicLinkVpc",
+                              "DisableVpcClassicLink",
+                              "EnableVpcClassicLink"
+                          ],
+                          "Match": "$.eventName"
+                      }
+                  ],
+                  "Keys": [
+                      "$.userIdentity.arn",
+                      "$.sourceIPAddress"
+                  ]
+              },
+              "LogFormat": "JSON",
+              "LogGroupNames": [
+                  "${CloudWatchLogGroup}"
+              ]
+          }
+        RuleName: CIS-VPC-Changes
+        RuleState: !Ref ContributorInsightRuleState
+
+    # CloudWatch Dashboard -
+    # display wigets containing reports from Insight Rules
+    CWDashboard:
+      Type: AWS::CloudWatch::Dashboard
+      DependsOn:
+        - UnauthorizedAPICallsInsightRule
+        - ConsoleSigninWithoutMFAInsightRule
+        - RootActivityInsightRule
+        - CloudTrailConfigurationChangesInsightRule
+        - ConsoleAuthenticationFailuresInsightRule
+        - CMKInsightRule
+        - S3BucketPolicyChangesInsightRule
+        - AWSConfigConfigurationChangesInsightRule
+        - SecurityGroupChangesInsightRule
+        - NetworkACLChangesInsightRule
+        - NetworkGatewayChangesInsightRule
+        - RouteTableChangesInsightRule
+        - VPCChangesInsightRule
+      Properties:
+
+        DashboardBody: !Sub |
+          {
+              "widgets": [
+                  {
+                      "type": "metric",
+                      "x": 0,
+                      "y": 12,
+                      "width": 12,
+                      "height": 6,
+                      "properties": {
+                          "period": 60,
+                          "insightRule": {
+                              "maxContributorCount": 10,
+                              "orderBy": "Sum",
+                              "ruleName": "${UnauthorizedAPICallsInsightRule.RuleName}"
+                          },
+                          "stacked": false,
+                          "view": "timeSeries",
+                          "yAxis": {
+                              "left": {
+                                  "showUnits": false
+                              },
+                              "right": {
+                                  "showUnits": false
+                              }
+                          },
+                            "region": "${AWS::Region}",
+                          "title": "Unauthorized API Calls",
+                          "legend": {
+                              "position": "right"
+                          }
+                      }
+                  },
+                  {
+                      "type": "metric",
+                      "x": 0,
+                      "y": 12,
+                      "width": 12,
+                      "height": 6,
+                      "properties": {
+                          "period": 60,
+                          "insightRule": {
+                              "maxContributorCount": 10,
+                              "orderBy": "Sum",
+                              "ruleName": "${ConsoleSigninWithoutMFAInsightRule.RuleName}"
+                          },
+                          "stacked": false,
+                          "view": "timeSeries",
+                          "yAxis": {
+                              "left": {
+                                  "showUnits": false
+                              },
+                              "right": {
+                                  "showUnits": false
+                              }
+                          },
+                            "region": "${AWS::Region}",
+                          "title": "Console Signin Without MFA",
+                          "legend": {
+                              "position": "right"
+                          }
+                      }
+                  },
+                  {
+                      "type": "metric",
+                      "x": 0,
+                      "y": 12,
+                      "width": 12,
+                      "height": 6,
+                      "properties": {
+                          "period": 60,
+                          "insightRule": {
+                              "maxContributorCount": 10,
+                              "orderBy": "Sum",
+                              "ruleName": "${RootActivityInsightRule.RuleName}"
+                          },
+                          "stacked": false,
+                          "view": "timeSeries",
+                          "yAxis": {
+                              "left": {
+                                  "showUnits": false
+                              },
+                              "right": {
+                                  "showUnits": false
+                              }
+                          },
+                            "region": "${AWS::Region}",
+                          "title": "Root Activity",
+                          "legend": {
+                              "position": "right"
+                          }
+                      }
+                  },
+                  {
+                      "type": "metric",
+                      "x": 0,
+                      "y": 12,
+                      "width": 12,
+                      "height": 6,
+                      "properties": {
+                          "period": 60,
+                          "insightRule": {
+                              "maxContributorCount": 10,
+                              "orderBy": "Sum",
+                              "ruleName": "${CloudTrailConfigurationChangesInsightRule.RuleName}"
+                          },
+                          "stacked": false,
+                          "view": "timeSeries",
+                          "yAxis": {
+                              "left": {
+                                  "showUnits": false
+                              },
+                              "right": {
+                                  "showUnits": false
+                              }
+                          },
+                            "region": "${AWS::Region}",
+                          "title": "CloudTrail Configuration Changes",
+                          "legend": {
+                              "position": "right"
+                          }
+                      }
+                  },
+                  {
+                      "type": "metric",
+                      "x": 0,
+                      "y": 12,
+                      "width": 12,
+                      "height": 6,
+                      "properties": {
+                          "period": 60,
+                          "insightRule": {
+                              "maxContributorCount": 10,
+                              "orderBy": "Sum",
+                              "ruleName": "${ConsoleAuthenticationFailuresInsightRule.RuleName}"
+                          },
+                          "stacked": false,
+                          "view": "timeSeries",
+                          "yAxis": {
+                              "left": {
+                                  "showUnits": false
+                              },
+                              "right": {
+                                  "showUnits": false
+                              }
+                          },
+                            "region": "${AWS::Region}",
+                          "title": "Console Authentication Failures",
+                          "legend": {
+                              "position": "right"
+                          }
+                      }
+                  },
+                  {
+                      "type": "metric",
+                      "x": 0,
+                      "y": 12,
+                      "width": 12,
+                      "height": 6,
+                      "properties": {
+                          "period": 60,
+                          "insightRule": {
+                              "maxContributorCount": 10,
+                              "orderBy": "Sum",
+                              "ruleName": "${CMKInsightRule.RuleName}"
+                          },
+                          "stacked": false,
+                          "view": "timeSeries",
+                          "yAxis": {
+                              "left": {
+                                  "showUnits": false
+                              },
+                              "right": {
+                                  "showUnits": false
+                              }
+                          },
+                            "region": "${AWS::Region}",
+                          "title": "CMK Disabled or Deleted",
+                          "legend": {
+                              "position": "right"
+                          }
+                      }
+                  },
+                  {
+                      "type": "metric",
+                      "x": 0,
+                      "y": 12,
+                      "width": 12,
+                      "height": 6,
+                      "properties": {
+                          "period": 60,
+                          "insightRule": {
+                              "maxContributorCount": 10,
+                              "orderBy": "Sum",
+                              "ruleName": "${S3BucketPolicyChangesInsightRule.RuleName}"
+                          },
+                          "stacked": false,
+                          "view": "timeSeries",
+                          "yAxis": {
+                              "left": {
+                                  "showUnits": false
+                              },
+                              "right": {
+                                  "showUnits": false
+                              }
+                          },
+                            "region": "${AWS::Region}",
+                          "title": "S3 Bucket Policy Changes",
+                          "legend": {
+                              "position": "right"
+                          }
+                      }
+                  },
+                  {
+                      "type": "metric",
+                      "x": 0,
+                      "y": 12,
+                      "width": 12,
+                      "height": 6,
+                      "properties": {
+                          "period": 60,
+                          "insightRule": {
+                              "maxContributorCount": 10,
+                              "orderBy": "Sum",
+                              "ruleName": "${AWSConfigConfigurationChangesInsightRule.RuleName}"
+                          },
+                          "stacked": false,
+                          "view": "timeSeries",
+                          "yAxis": {
+                              "left": {
+                                  "showUnits": false
+                              },
+                              "right": {
+                                  "showUnits": false
+                              }
+                          },
+                            "region": "${AWS::Region}",
+                          "title": "AWS Config Configuration Changes",
+                          "legend": {
+                              "position": "right"
+                          }
+                      }
+                  },
+                  {
+                      "type": "metric",
+                      "x": 0,
+                      "y": 12,
+                      "width": 12,
+                      "height": 6,
+                      "properties": {
+                          "period": 60,
+                          "insightRule": {
+                              "maxContributorCount": 10,
+                              "orderBy": "Sum",
+                              "ruleName": "${SecurityGroupChangesInsightRule.RuleName}"
+                          },
+                          "stacked": false,
+                          "view": "timeSeries",
+                          "yAxis": {
+                              "left": {
+                                  "showUnits": false
+                              },
+                              "right": {
+                                  "showUnits": false
+                              }
+                          },
+                            "region": "${AWS::Region}",
+                          "title": "Security Group Changes",
+                          "legend": {
+                              "position": "right"
+                          }
+                      }
+                  },
+                  {
+                      "type": "metric",
+                      "x": 0,
+                      "y": 12,
+                      "width": 12,
+                      "height": 6,
+                      "properties": {
+                          "period": 60,
+                          "insightRule": {
+                              "maxContributorCount": 10,
+                              "orderBy": "Sum",
+                              "ruleName": "${NetworkACLChangesInsightRule.RuleName}"
+                          },
+                          "stacked": false,
+                          "view": "timeSeries",
+                          "yAxis": {
+                              "left": {
+                                  "showUnits": false
+                              },
+                              "right": {
+                                  "showUnits": false
+                              }
+                          },
+                            "region": "${AWS::Region}",
+                          "title": "Network ACL Changes",
+                          "legend": {
+                              "position": "right"
+                          }
+                      }
+                  },
+                  {
+                      "type": "metric",
+                      "x": 0,
+                      "y": 12,
+                      "width": 12,
+                      "height": 6,
+                      "properties": {
+                          "period": 60,
+                          "insightRule": {
+                              "maxContributorCount": 10,
+                              "orderBy": "Sum",
+                              "ruleName": "${NetworkGatewayChangesInsightRule.RuleName}"
+                          },
+                          "stacked": false,
+                          "view": "timeSeries",
+                          "yAxis": {
+                              "left": {
+                                  "showUnits": false
+                              },
+                              "right": {
+                                  "showUnits": false
+                              }
+                          },
+                            "region": "${AWS::Region}",
+                          "title": "Network Gateway Changes",
+                          "legend": {
+                              "position": "right"
+                          }
+                      }
+                  },
+                  {
+                      "type": "metric",
+                      "x": 0,
+                      "y": 12,
+                      "width": 12,
+                      "height": 6,
+                      "properties": {
+                          "period": 60,
+                          "insightRule": {
+                              "maxContributorCount": 10,
+                              "orderBy": "Sum",
+                              "ruleName": "${RouteTableChangesInsightRule.RuleName}"
+                          },
+                          "stacked": false,
+                          "view": "timeSeries",
+                          "yAxis": {
+                              "left": {
+                                  "showUnits": false
+                              },
+                              "right": {
+                                  "showUnits": false
+                              }
+                          },
+                            "region": "${AWS::Region}",
+                          "title": "Route Table Changes",
+                          "legend": {
+                              "position": "right"
+                          }
+                      }
+                  },
+                  {
+                      "type": "metric",
+                      "x": 0,
+                      "y": 12,
+                      "width": 12,
+                      "height": 6,
+                      "properties": {
+                          "period": 60,
+                          "insightRule": {
+                              "maxContributorCount": 10,
+                              "orderBy": "Sum",
+                              "ruleName": "${VPCChangesInsightRule.RuleName}"
+                          },
+                          "stacked": false,
+                          "view": "timeSeries",
+                          "yAxis": {
+                              "left": {
+                                  "showUnits": false
+                              },
+                              "right": {
+                                  "showUnits": false
+                              }
+                          },
+                            "region": "${AWS::Region}",
+                          "title": "VPC Changes",
+                          "legend": {
+                              "position": "right"
+                          }
+                      }
+                  }
+              ]
+           }
+        DashboardName: CIS-Monitoring-Dashboard
+        
+Outputs:
+  OutputDashboardURI:
+    Description: Link to the CloudWatch Dashboard
+    Value: !Sub 'https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${CWDashboard}'
