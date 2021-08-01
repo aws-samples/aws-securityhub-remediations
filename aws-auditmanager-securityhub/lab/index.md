@@ -16,7 +16,7 @@ Refer to [Integrate across the Three Lines Model (Part 1): Build a custom automa
 1.	[Enable Security Hub](https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-enable.html#securityhub-enable-console) in your account
 2.  [Setup AWS Audit Manager](https://docs.aws.amazon.com/audit-manager/latest/userguide/setting-up.html#setup-audit-manager). In the [AWS Audit Manager console](https://console.aws.amazon.com/auditmanager/home), configure your [AWS Audit Manager settings](https://docs.aws.amazon.com/audit-manager/latest/userguide/console-settings.html).
 3. Create an [IAM user with Audit owner permissions](https://docs.aws.amazon.com/audit-manager/latest/userguide/security_iam_service-with-iam.html#security_iam_service-with-iam-id-based-policies). You can use the AWSAuditManagerAdministratorAccess policy as a starting point for this lab, but scope down these permissions as appropriate for your requirements.
-4. Create an Amazon S3 bucket with the following name: s3-customauditmanagerframework-<AccountId>-<Region> where <AccountId> is your AWS account ID and <Region> is the AWS Region where you plan to deploy the CloudFormation templates. In this bucket, create a folder named CustomAuditManagerFramework_Lambda. [Create a directory](https://docs.aws.amazon.com/AmazonS3/latest/user-guide/create-folder.html) and then upload the [CustomAuditManagerFramework_Lambda.zip](https://github.com/aws-samples/aws-securityhub-remediations/blob/main/aws-auditmanager-securityhub/lambda/CustomAuditManagerFramework_Lambda.zip) file there.
+4. Create an Amazon S3 bucket with the following name: s3-customauditmanagerframework-*AccountId*-*Region* where *AccountId* is your AWS account ID and *Region* is the AWS Region where you plan to deploy the CloudFormation templates. In this bucket, create a folder named *CustomAuditManagerFramework_Lambda*. [Create a directory](https://docs.aws.amazon.com/AmazonS3/latest/user-guide/create-folder.html) and then upload the [CustomAuditManagerFramework_Lambda.zip](https://github.com/aws-samples/aws-securityhub-remediations/blob/main/aws-auditmanager-securityhub/lambda/CustomAuditManagerFramework_Lambda.zip) file there.
 4. If you have already configured an [assessment reports destination](https://docs.aws.amazon.com/audit-manager/latest/userguide/console-settings.html#settings-destination) in your AWS Audit Manager settings, you can skip this step. Otherwise, you can simply reuse the Amazon S3 bucket you created in step 4. The bucket must be in the same AWS Region as your assessment. Create a folder in the bucket for evidence and then [create a directory](https://docs.aws.amazon.com/AmazonS3/latest/user-guide/create-folder.html). Your assessment reports destination will be the Amazon S3 URI (for example, s3://s3-customauditmanagerframework-<AccountId>-<Region>/evidences/). AWS Audit Manager will save your assessment reports to this bucket.
 5. Audit Manager works with the [Boto3 1.7](https://boto3.amazonaws.com/v1/documentation/api/1.7.74/index.html) libraries. AWS Lambda doesn’t ship with Boto3 1.7 by default. This implementation provides that version of Boto3 as a [Lambda layer](https://docs.aws.amazon.com/lambda/latest/dg/configuration-layers.html). Upload the [auditmanagerlayer.zip](https://github.com/aws-samples/aws-securityhub-remediations/blob/main/aws-auditmanager-securityhub/layer/auditmanagerlayer.zip) to the top directory of the Amazon S3 bucket you created in step 4.
 
@@ -32,14 +32,14 @@ Refer to [Integrate across the Three Lines Model (Part 1): Build a custom automa
 
 ## Review the Custom Audit Manager Controls, Framework and Assessment
 
-1. Navigate to the [AWS Audit Manager console](https://console.aws.amazon.com/auditmanager/home). From the left panel, select **Control library** and then select **Custom Control** on the right panel. You will see the list of custom controls that have been created for *you*
+1. Navigate to the [AWS Audit Manager console](https://console.aws.amazon.com/auditmanager/home). From the left panel, select **Control library** and then select **Custom Control** on the right panel. You will see the list of custom controls that have been created for IAM and Networking monitoring related areas that span across the Security Hub compliance standards.
 ![](images/cft/12.PNG)
 
 2. From the left panel, select **Framework Library** and then select **Custom Framework** on the right pane to view the custom Audit Manager framework *Security Hub Custom Framework* that was provisioned by the solution
-![](/images/cft/17.PNG)
+![](images/cft/17.PNG)
 
 3. Select the custom framework from the previous step.  Under the **Control** section, you will see that this framework incorporates custom Security Hub controls that you reviewed in the **Custom Control** tab from Step 1
-![](/images/cft/18.PNG)
+![](images/cft/18.PNG)
 
 4. On the left hand panel, select **Assessments** and you will see that a custom assessment was provisioned by the solution. Select the custom assessment named **CustomSecurityHubAssessment** and view the custom controls that correspond to the NERC-CIP compliance standard
 ![](images/cft/10.PNG)
