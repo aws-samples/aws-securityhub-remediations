@@ -36,10 +36,10 @@ Refer to [Integrate across the Three Lines Model (Part 1): Build a custom automa
 ![](images/cft/12.PNG)
 
 2. Click on the *CustomMonitoringSecurityHubControl* to view the data sources for this custom control. All data sources use Security Hub Findings, however they span across the 3 compliance standards supported by Security Hub and are specific to monitoring related findings
-![](images/cft/customcontrol-2.PNG)
+![](images/cft/customcontrol-2.png)
 
 3. Click on the *CustomIAMSecurityHubControl* to view the data sources for this custom control. All data sources use Security Hub Findings, however they span across the 3 compliance standards supported by Security Hub and are specific to IAM related findings
-![](images/cft/customcontrol-4.PNG)
+![](images/cft/customcontrol-4.png)
 
 4. From the left panel, select **Framework Library** and then select **Custom Framework** on the right pane to view the custom Audit Manager framework *Security Hub Custom Framework* that was provisioned by the solution.
 ![](images/cft/17.PNG)
