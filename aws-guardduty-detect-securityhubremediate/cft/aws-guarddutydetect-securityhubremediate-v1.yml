@@ -25,12 +25,19 @@ Parameters:
     Description: EC2 Key Pair
     Type: "AWS::EC2::KeyPair::KeyName"
   EmailAddress:
-    Description: Email address for receiving alerts.
     Type: String
-    AllowedPattern: ".+"
-  LatestAWSLinuxAmiId:
-    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    Description: SNS Email Address
+    Default: "kmmahaj@amazon.com"
+Mappings:
+  RegionMap:
+    us-east-2:
+      "AMALINUX" : "ami-0e01ce4ee18447327" 
+    us-east-1:
+      "AMALINUX" : "ami-0fc61db8544a617ed" 
+    us-west-1:
+      "AMALINUX" : "ami-09a7fe78668f1e2c0" 
+    us-west-2:
+      "AMALINUX" : "ami-0ce21b51cb31a48b8" 
 
 Resources:
 
@@ -414,109 +421,6 @@ Resources:
         - arn:aws:iam::aws:policy/IAMFullAccess
         - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
 
-#------------------------------------------------------------------------------------------------------
-# VPC Set up
-#
-#------------------------------------------------------------------------------------------------------
-
-  vpc1:
-    Type: AWS::EC2::VPC
-    DependsOn: 
-      - igw1
-    Properties:
-      CidrBlock: '10.10.0.0/16'
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
-
-  igw1:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: 'IGW1'
-
-  igwattach1:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      InternetGatewayId: !Ref igw1
-      VpcId: !Ref vpc1
-
-  subnetvpc1:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref vpc1
-      AvailabilityZone: !Select [ 0, !GetAZs '' ]
-      CidrBlock: '10.10.0.0/20'
-      MapPublicIpOnLaunch: true
-
-  rtablesubnetvpc1:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref vpc1
-
-  rtpublicvpc1:
-    Type: AWS::EC2::Route
-    DependsOn: igwattach1
-    Properties:
-      RouteTableId: !Ref rtablesubnetvpc1
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref igw1
-
-  subnetvpc1rtable:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      RouteTableId: !Ref rtablesubnetvpc1
-      SubnetId: !Ref subnetvpc1
-
-  vpc3:
-    Type: AWS::EC2::VPC
-    DependsOn: 
-      - igw3
-    Properties:
-      CidrBlock: '10.11.0.0/16'
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
-
-  igw3:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: 'IGW3'
-
-  igwattach3:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      InternetGatewayId: !Ref igw3
-      VpcId: !Ref vpc3
-
-  subnetvpc3:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref vpc3
-      AvailabilityZone: !Select [ 0, !GetAZs '' ]
-      CidrBlock: '10.11.0.0/20'
-      MapPublicIpOnLaunch: true
-
-  rtablesubnetvpc3:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref vpc3
-
-  rtpublicvpc3:
-    Type: AWS::EC2::Route
-    DependsOn: igwattach3
-    Properties:
-      RouteTableId: !Ref rtablesubnetvpc3
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref igw3
-
-  subnetvpc3rtable:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      RouteTableId: !Ref rtablesubnetvpc3
-      SubnetId: !Ref subnetvpc3
-
 # -----------------------------------------------------------------------------------------------------------------------
 # EC2 Set up
 # Provisions EC2 instances in the relevant subnets and associated security groups for VPC1 and VPC3 
@@ -537,8 +441,7 @@ Resources:
       - EIPEC2VPC3
       - EC2VPC1InstanceProfile
     Properties:
-    #  ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMALINUX] # Dynamic mapping + Pseudo Parameter
-      ImageId: !Ref LatestAWSLinuxAmiId
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMALINUX] # Dynamic mapping + Pseudo Parameter
       InstanceType: t2.micro
       IamInstanceProfile: !Ref EC2VPC1InstanceProfile
       KeyName: !Ref KeyName
@@ -547,7 +450,7 @@ Resources:
           DeviceIndex: "0"
           GroupSet: 
             - Ref: SGEC2VPC1
-          SubnetId: !Ref subnetvpc1
+          SubnetId: !ImportValue subnetvpc1
       UserData:
         Fn::Base64: !Sub 
           - |
@@ -587,8 +490,7 @@ Resources:
     DependsOn: 
       - SGEC2VPC3
     Properties:
-      # ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMALINUX] # Dynamic mapping + Pseudo Parameter
-      ImageId: !Ref LatestAWSLinuxAmiId
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMALINUX] # Dynamic mapping + Pseudo Parameter
       InstanceType: t2.micro
       KeyName: !Ref KeyName
       NetworkInterfaces: 
@@ -596,7 +498,7 @@ Resources:
           DeviceIndex: "0"
           GroupSet: 
             - Ref: SGEC2VPC3
-          SubnetId: !Ref subnetvpc3
+          SubnetId: !ImportValue subnetvpc3
      
   EC2VPC1InstanceProfile:
     DependsOn:
@@ -606,6 +508,7 @@ Resources:
       Path: /
       Roles:
         - !Ref EC2VPC1Role 
+
 
   EC2VPC1Role:
     Type: AWS::IAM::Role
@@ -673,7 +576,7 @@ Resources:
     Type: "AWS::EC2::SecurityGroup"
     Properties:
       GroupDescription: !Join ["", ["Stack", "-", !Ref "AWS::StackId", "-", "VPC1"]]
-      VpcId: !Ref vpc1
+      VpcId: !ImportValue vpc1id
       SecurityGroupIngress:
         -
           CidrIp: 0.0.0.0/0
@@ -695,7 +598,7 @@ Resources:
     Type: "AWS::EC2::SecurityGroup"
     Properties:
       GroupDescription: !Join ["", ["Stack", "-", !Ref "AWS::StackId", "-", "VPC1"]]
-      VpcId: !Ref vpc1
+      VpcId: !ImportValue vpc1id
       SecurityGroupIngress:
         -
           CidrIp: 10.10.0.0/16
@@ -713,7 +616,7 @@ Resources:
     Type: "AWS::EC2::SecurityGroup"
     Properties:
       GroupDescription: !Join ["", ["Stack", "-", !Ref "AWS::StackId", "-", "VPC3"]]
-      VpcId: !Ref vpc3
+      VpcId: !ImportValue vpc3id
       SecurityGroupIngress:
         -
           CidrIp: 0.0.0.0/0

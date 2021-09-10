@@ -28,7 +28,7 @@
 * Provisions a multiple VPC environment to provide an AWS environment with built-in security groups and networking
 
 
-2. **Template 2 of 2:** aws-guarddutydetect-securityhubremediate.yml
+2. **Template 2 of 2:** aws-guarddutydetect-securityhubremediate-v1.yml
 * 1-click install. Enter EC2 key pair.
 * After the install - Add EIP of EC2 in VPC3 to a text based threat list; upload threat list to the provisioned S3 bucket. Added S3 URL to GuardDuty Threat List
 

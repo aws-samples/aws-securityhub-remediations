@@ -17,6 +17,16 @@ Parameters:
     Type: String
     Default:  admin@example.com
 
+  CloudTrailLogGroup:
+    Description: Name of the CloudWatch Log group for CloudTrail
+    Type: String
+    Default:  CloudTrail/DefaultLogGroup
+
+  TopicName:
+    Description: SNS Topic Name
+    Type: String
+    Default:  CISTopic
+
 Resources:
 
 #===============================================================================================================================
@@ -27,8 +37,8 @@ Resources:
   AlarmNotificationTopic:
     Type: 'AWS::SNS::Topic'
     Properties:
-      DisplayName: AlarmNotificationTopic
-      TopicName: AlarmNotificationTopic
+      DisplayName: !Ref TopicName
+      TopicName: !Ref TopicName
 
 # Email Subscription for SNS topic
   AlarmEmailSubscription:
@@ -38,12 +48,6 @@ Resources:
       Endpoint: !Ref EmailAddress
       TopicArn: !Ref AlarmNotificationTopic
 
-# CloudTrail CloudWatch Log Group
-  CloudTrailLogGroup: 
-    Type: AWS::Logs::LogGroup
-    Properties: 
-      LogGroupName: !Sub DefaultLogGroup-CIS-${AWS::Region}
-      RetentionInDays: 1827
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------
