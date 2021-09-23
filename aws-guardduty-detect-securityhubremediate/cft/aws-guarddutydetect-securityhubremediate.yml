@@ -676,12 +676,22 @@ Resources:
       VpcId: !Ref vpc1
       SecurityGroupIngress:
         -
-          CidrIp: 0.0.0.0/0
+          CidrIp: !GetAtt vpc3.CidrBlock
           IpProtocol: tcp
           ToPort: 22
           FromPort: 22
         -
-          CidrIp: 0.0.0.0/0
+          CidrIp: !GetAtt vpc3.CidrBlock
+          IpProtocol: icmp
+          ToPort: "-1"
+          FromPort: "-1"
+        -
+          CidrIp: !GetAtt vpc1.CidrBlock
+          IpProtocol: tcp
+          ToPort: 22
+          FromPort: 22
+        -
+          CidrIp: !GetAtt vpc1.CidrBlock
           IpProtocol: icmp
           ToPort: "-1"
           FromPort: "-1"
@@ -698,7 +708,22 @@ Resources:
       VpcId: !Ref vpc1
       SecurityGroupIngress:
         -
-          CidrIp: 10.10.0.0/16
+          CidrIp: !GetAtt vpc3.CidrBlock
+          IpProtocol: tcp
+          ToPort: 22
+          FromPort: 22
+        -
+          CidrIp: !GetAtt vpc3.CidrBlock
+          IpProtocol: icmp
+          ToPort: "-1"
+          FromPort: "-1"
+        -
+          CidrIp: !GetAtt vpc1.CidrBlock
+          IpProtocol: tcp
+          ToPort: 22
+          FromPort: 22
+        -
+          CidrIp: !GetAtt vpc1.CidrBlock
           IpProtocol: icmp
           ToPort: "-1"
           FromPort: "-1"
@@ -716,15 +741,26 @@ Resources:
       VpcId: !Ref vpc3
       SecurityGroupIngress:
         -
-          CidrIp: 0.0.0.0/0
+          CidrIp: !GetAtt vpc3.CidrBlock
           IpProtocol: tcp
           ToPort: 22
           FromPort: 22
         -
-          CidrIp: 0.0.0.0/0
+          CidrIp: !GetAtt vpc3.CidrBlock
           IpProtocol: icmp
           ToPort: "-1"
           FromPort: "-1"
+        -
+          CidrIp: !GetAtt vpc1.CidrBlock
+          IpProtocol: tcp
+          ToPort: 22
+          FromPort: 22
+        -
+          CidrIp: !GetAtt vpc1.CidrBlock
+          IpProtocol: icmp
+          ToPort: "-1"
+          FromPort: "-1"
+
       SecurityGroupEgress:
         -
           CidrIp: 0.0.0.0/0

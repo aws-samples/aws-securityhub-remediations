@@ -1,6 +1,7 @@
 <p align="center">
 </p>
 
+
 ## AWS GuardDuty Detection with AWS Security Hub Remediation 
 
  1. AWS GuardDuty **Detects** Findings; AWS Security Hub **Remediates** those findings.
