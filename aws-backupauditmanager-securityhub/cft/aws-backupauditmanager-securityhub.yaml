@@ -1,0 +1,207 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Automated Backup Compliance using AWS Backup Audit Manager and AWS Security Hub
+
+# ----------------------------------------------------------------------------------------------------------
+#  CloudFormation Template 1 of 1 - 
+#   
+#  
+#  1- Provisions an AWS Backup Audit Manager framework with 5 default controls
+#  2- Provisions CloudWatchEvents (EventBridge) Rule:
+#    - CloudWatchEvents Rule is triggered based on a AWS Config rule evaluation of a backup audit manager control
+#  3- Provisions a Compliance Lambda as a target for the CloudWatch Events Rule.
+#  4- Compliance Lambda: 
+#   - Obtains event details from the Config rule
+#   - Creates a finding in AWS Security Hub
+#  5 - Provisions an AWS Security Hub Custom Action
+#    - Performs remediation 
+# 
+# 
+# @kmmahaj
+##
+## License:
+## This code is made available under the MIT-0 license. See the LICENSE file.
+# ------------------------------------------------------------...............................................
+
+ 
+Resources:
+
+# --------------------------------------------------------------------------------------------------
+#  1- Provisions an AWS Backup Audit Manager framework with 5 default controls
+# --------------------------------------------------------------------------------------------------
+
+  SecurityHubBackupFramework:
+    Type: AWS::Backup::Framework
+    Properties:
+      FrameworkControls:
+        - ControlName: BACKUP_RESOURCES_PROTECTED_BY_BACKUP_PLAN
+        - ControlName: BACKUP_RECOVERY_POINT_MINIMUM_RETENTION_CHECK
+          ControlInputParameters:
+            - ParameterName: requiredRetentionDays
+              ParameterValue: '35'
+        - ControlName: BACKUP_RECOVERY_POINT_MANUAL_DELETION_DISABLED
+        - ControlName: BACKUP_PLAN_MIN_FREQUENCY_AND_MIN_RETENTION_CHECK
+          ControlInputParameters:
+            - ParameterName: requiredRetentionDays
+              ParameterValue: '35'
+            - ParameterName: requiredFrequencyUnit
+              ParameterValue: 'hours'
+            - ParameterName: requiredFrequencyValue
+              ParameterValue: '24'
+        - ControlName: BACKUP_RECOVERY_POINT_ENCRYPTED
+
+# --------------------------------------------------------------------------------------------------
+#  2- Provisions a CloudWatchEvents Rule based on an AWS Config rule evaluation of a backup audit manager control
+#  3- Provisions a Lambda that creates a finding in AWS Security Hub 
+# --------------------------------------------------------------------------------------------------
+
+  CaptureBackupConfigRuleEvents:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Capture Backup Config Rule Events and Trigger an Action
+      EventPattern:
+        detail-type:
+          - Config Rules Compliance Change
+        source:
+          - aws.config
+      Name: CaptureBackupConfigRuleEvent
+      State: ENABLED
+      Targets:
+      - Arn: !GetAtt "BackupToSecHubSendFindingsLambda.Arn"
+        Id: IDCaptureBackupConfigRuleEvents
+
+  BackupToSecHubSendFindingsLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: Backup2SecurityHubSendFindingsLambda
+      Description: Maps Config rule evaluation based on Backup Audit control into ASFF before importing to Security Hub
+      Handler: index.lambda_handler
+      MemorySize: 384
+      Role: !GetAtt BackupToSecHubSendFindingsLambdaRole.Arn
+      Runtime: python3.7
+      Timeout: 70
+      Environment:
+        Variables:
+          account_num: !Ref 'AWS::AccountId'
+          region: !Ref 'AWS::Region'
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import datetime
+          import uuid
+          import os
+          
+          config = boto3.client('config')
+          sechub = boto3.client('securityhub')
+
+          def get_description_of_rule(config_rule_name):
+              description = ""
+              try:
+                  response = config.describe_config_rules(
+                      ConfigRuleNames=[config_rule_name]
+                  )
+                  if 'Description' in response['ConfigRules'][0]:
+                      description = response['ConfigRules'][0]['Description']
+                  else:
+                      description = response['ConfigRules'][0]['ConfigRuleName']
+                  return description
+              except Exception as error:
+                  print("Error: ", error)
+                  raise
+
+          def lambda_handler(event, context):
+              # import Lambda ENV VARs
+              accountId = os.environ['account_num']
+              # Get Config event details
+              finding_id = event['id']
+              eventDetails = event['detail']
+              config_rule_name = eventDetails['configRuleName']
+              config_rule_arn = eventDetails['configRuleARN']
+              resource_type = eventDetails['resourceType']
+              resource_id = eventDetails['resourceId']
+              awsRegion = eventDetails['awsRegion']
+              new_status = eventDetails['newEvaluationResult']['complianceType'] 
+              description = get_description_of_rule(config_rule_name)             
+              # send finding to Security Hub
+              severity = "LOW"
+              title = config_rule_name
+              status = 'FAILED'
+              if new_status == 'COMPLIANT':
+                 status = 'PASSED'
+              # ISO Time
+              iso8061Time = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc).isoformat()
+              # import security hub boto3 client
+              try:
+                  response = sechub.batch_import_findings(
+                      Findings=[
+                          {
+                              'SchemaVersion': '2018-10-08',
+                              'Id': finding_id,
+                              'ProductArn': 'arn:aws:securityhub:' + awsRegion + ':' + accountId + ':product/' + accountId + '/default',
+                              'GeneratorId': config_rule_arn,
+                              'AwsAccountId': accountId,
+                              'Types': [ 'Software and Configuration Checks' ],
+                              'FirstObservedAt': iso8061Time,
+                              'UpdatedAt': iso8061Time,
+                              'CreatedAt': iso8061Time,
+                              'Severity': {
+                                  'Label': severity
+                              },
+                              'Title': title,
+                              'Description': description,
+                              'Resources': [
+                                  {
+                                      'Type': resource_type,
+                                      'Id': resource_id,
+                                      'Partition': 'aws',
+                                      'Region': awsRegion,
+                                  }
+                              ],
+                              'WorkflowState': 'NEW',
+                              'Compliance': {'Status': status},
+                              'RecordState': 'ACTIVE'
+                          }
+                      ]
+                  )
+                  print(response)
+              except Exception as e:
+                  print(e)
+                  print("Submitting finding to Security Hub failed, please troubleshoot further")
+                  raise
+  
+  BackupToSecHubSendFindingsLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Policies:
+      - PolicyName: BackupToSecHubSendFindingsLambda-Policy
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - cloudwatch:PutMetricData
+            - securityhub:BatchImportFindings
+            - config:DescribeConfigRules
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: '*'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal: { Service: lambda.amazonaws.com }
+          Action:
+          - sts:AssumeRole
+
+  PermissionForEventsToInvokeLambdachk:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt "BackupToSecHubSendFindingsLambda.Arn"
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt "CaptureBackupConfigRuleEvents.Arn"
+
