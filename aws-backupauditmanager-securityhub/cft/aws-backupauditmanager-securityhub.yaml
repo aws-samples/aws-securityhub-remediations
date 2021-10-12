@@ -110,8 +110,7 @@ Resources:
                   raise
 
           def lambda_handler(event, context):
-              # import Lambda ENV VARs
-              accountId = os.environ['account_num']
+           
               # Get Config event details
               finding_id = event['id']
               eventDetails = event['detail']
@@ -120,6 +119,7 @@ Resources:
               resource_type = eventDetails['resourceType']
               resource_id = eventDetails['resourceId']
               awsRegion = eventDetails['awsRegion']
+              accountId = event['detail']['awsAccountId']
               new_status = eventDetails['newEvaluationResult']['complianceType'] 
               description = get_description_of_rule(config_rule_name)             
               # send finding to Security Hub
