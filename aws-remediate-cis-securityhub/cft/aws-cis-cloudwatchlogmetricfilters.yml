@@ -589,3 +589,53 @@ Resources:
       - MetricValue: '1'
         MetricNamespace: LogMetrics
         MetricName: VPCChanges
+
+# ------------------------------------------------------------------------------------------------------------------------------------
+# CIS AWS Foundations Benchmark - 4.15 Ensure a log metric filter and alarm exists for AWS Organizations changes
+# ------------------------------------------------------------------------------------------------------------------------------------
+  OrganizationChangesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CIS-Organizations Changes
+      AlarmDescription: Alarm if AWS Organization changes attempted
+      MetricName: OrganizationsChanges
+      Namespace: LogMetrics
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: '1'
+      Threshold: 1
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+
+  OrganizationChangesFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref CloudTrailLogGroup
+      FilterName: "OrganizationsChanges"
+      FilterPattern: |-
+        {
+          ($.eventSource = organizations.amazonaws.com) && (
+          ($.eventName = "AcceptHandshake") ||
+          ($.eventName = "AttachPolicy") ||
+          ($.eventName = "CreateAccount") ||
+          ($.eventName = "CreateOrganizationalUnit") ||
+          ($.eventName = "CreatePolicy") ||
+          ($.eventName = "DeclineHandshake") ||
+          ($.eventName = "DeleteOrganization") ||
+          ($.eventName = "DeleteOrganizationalUnit") ||
+          ($.eventName = "DeletePolicy") ||
+          ($.eventName = "DetachPolicy") ||
+          ($.eventName = "DisablePolicyType") ||
+          ($.eventName = "EnablePolicyType") ||
+          ($.eventName = "InviteAccountToOrganization") ||
+          ($.eventName = "LeaveOrganization") ||
+          ($.eventName = "MoveAccount") ||
+          ($.eventName = "RemoveAccountFromOrganization") ||
+          ($.eventName = "UpdatePolicy") ||
+          ($.eventName = "UpdateOrganizationalUnit"))
+        }
+      MetricTransformations:
+      - MetricValue: '1'
+        MetricNamespace: LogMetrics
+        MetricName: OrganizationsChanges
