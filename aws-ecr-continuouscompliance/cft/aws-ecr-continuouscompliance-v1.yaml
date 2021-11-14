@@ -87,6 +87,10 @@ Resources:
               severity = "LOW"
               title = "ECR Finding"
               ECRComplianceRating = 'PASSED'
+              if numMedium:
+                  severity = "MEDIUM"
+                  title = "Medium ECR Vulnerability"
+                  ECRComplianceRating = 'FAILED'
               if numHigh:
                   severity = "HIGH"
                   title = "High ECR Vulnerability"
@@ -95,10 +99,7 @@ Resources:
                   severity = "CRITICAL"
                   title = "Critical ECR Vulnerability"
                   ECRComplianceRating = 'FAILED'
-              if numMedium:
-                  severity = "MEDIUM"
-                  title = "Medium ECR Vulnerability"
-                  ECRComplianceRating = 'FAILED'
+
 
               # ISO Time
               iso8061Time = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc).isoformat()
