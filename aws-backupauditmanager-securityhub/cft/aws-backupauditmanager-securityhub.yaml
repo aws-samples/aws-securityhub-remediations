@@ -12,9 +12,6 @@ Description: Automated Backup Compliance using AWS Backup Audit Manager and AWS 
 #  4- Compliance Lambda: 
 #   - Obtains event details from the Config rule
 #   - Creates a finding in AWS Security Hub
-#  5 - Provisions an AWS Security Hub Custom Action
-#    - Performs remediation 
-# 
 # 
 # @kmmahaj
 ##
