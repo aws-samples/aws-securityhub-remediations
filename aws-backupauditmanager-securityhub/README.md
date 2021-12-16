@@ -21,7 +21,7 @@ Integrates Backup Audit Manager with Security Hub. The solution provisions a AWS
 
 ## Install
 
-1. 1 step install - Launch the **aws-backupauditmanager-securityhub.yaml** template. The template takes no parameters.
+1. 1 step install - Launch the [**aws-backupauditmanager-securityhub.yaml**](https://github.com/aws-samples/aws-securityhub-remediations/blob/main/aws-backupauditmanager-securityhub/cft/aws-backupauditmanager-securityhub.yaml) template. The template takes no parameters.
 
 ## Test
 
