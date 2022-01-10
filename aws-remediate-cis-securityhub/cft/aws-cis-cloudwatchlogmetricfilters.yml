@@ -607,12 +607,10 @@ Resources:
       AlarmActions:
         - !Ref AlarmNotificationTopic
       ComparisonOperator: GreaterThanOrEqualToThreshold
-
   OrganizationChangesFilter:
     Type: AWS::Logs::MetricFilter
     Properties:
       LogGroupName: !Ref CloudTrailLogGroup
-      FilterName: "OrganizationsChanges"
       FilterPattern: |-
         {
           ($.eventSource = organizations.amazonaws.com) && (
