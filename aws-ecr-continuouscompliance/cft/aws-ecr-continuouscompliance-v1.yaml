@@ -137,7 +137,7 @@ Resources:
                               {
                                   'Type': 'AwsEcr',
                                   'Id': 'AWS::::Account:' + accountId,
-                                  'Partition': 'aws',
+                                  'Partition': awsPartition,
                                   'Region': awsRegion,
                               }
                           ],
