@@ -34,6 +34,8 @@ Resources:
     Properties:
       Description: Capture ECR Scan Events and Trigger an Action
       EventPattern:
+        # https://docs.aws.amazon.com/AmazonECR/latest/userguide/ecr-eventbridge.html#ecr-eventbridge-bus
+        # When basic scanning is enabled for your registry, the following event is sent when each image scan is completed.
         detail-type:
           - ECR Image Scan
         source:
@@ -58,17 +60,20 @@ Resources:
         Variables:
           account_num: !Ref 'AWS::AccountId'
           region: !Ref 'AWS::Region'
+          partition: !Ref 'AWS::Partition'
       Code:
-        ZipFile: |
+        ZipFile: !Sub |
           import json
           import boto3
           import datetime
           import uuid
           import os
           def lambda_handler(event, context):
+              print(json.dumps(event, default=str))
               # import Lambda ENV VARs
               accountId = os.environ['account_num']
               awsRegion = os.environ['region']
+              awsPartition = os.environ['partition']
               # Get ECR event details
               eventDetails = event['detail']
               repoName = eventDetails['repository-name']
@@ -109,40 +114,40 @@ Resources:
               sechub = boto3.client('securityhub')
               # call BIF
               try:
-                  response = sechub.batch_import_findings(
-                      Findings=[
-                          {
-                              'SchemaVersion': '2018-10-08',
-                              'Id': asffID,
-                              'ProductArn': 'arn:aws:securityhub:' + awsRegion + ':' + accountId + ':product/' + accountId + '/default',
-                              'ProductFields': {
-                                  'ECRRepoName': repoName,
-                              },
-                              'GeneratorId': asffID,
-                              'AwsAccountId': accountId,
-                              'Types': [ 'Software and Configuration Checks' ],
-                              'FirstObservedAt': iso8061Time,
-                              'UpdatedAt': iso8061Time,
-                              'CreatedAt': iso8061Time,
-                              'Severity': {
-                                  'Label': severity
-                              },
-                              'Title': title,
-                              'Description': title,
-                              'Resources': [
-                                  {
-                                      'Type': 'AwsEcr',
-                                      'Id': 'AWS::::Account:' + accountId,
-                                      'Partition': 'aws',
-                                      'Region': awsRegion,
-                                  }
-                              ],
-                              'WorkflowState': 'NEW',
-                              'Compliance': {'Status': ECRComplianceRating},
-                              'RecordState': 'ACTIVE'
-                          }
-                      ]
-                  )
+                  findings = [
+                      {
+                          'SchemaVersion': '2018-10-08',
+                          'Id': asffID,
+                          'ProductArn': f"arn:{awsPartition}:securityhub:{awsRegion}:{accountId}:product/{accountId}/default",
+                          'ProductFields': {
+                              'ECRRepoName': repoName,
+                          },
+                          'GeneratorId': asffID,
+                          'AwsAccountId': accountId,
+                          'Types': [ 'Software and Configuration Checks' ],
+                          'FirstObservedAt': iso8061Time,
+                          'UpdatedAt': iso8061Time,
+                          'CreatedAt': iso8061Time,
+                          'Severity': {
+                              'Label': severity
+                          },
+                          'Title': title,
+                          'Description': title,
+                          'Resources': [
+                              {
+                                  'Type': 'AwsEcr',
+                                  'Id': 'AWS::::Account:' + accountId,
+                                  'Partition': 'aws',
+                                  'Region': awsRegion,
+                              }
+                          ],
+                          'WorkflowState': 'NEW',
+                          'Compliance': {'Status': ECRComplianceRating},
+                          'RecordState': 'ACTIVE'
+                      }
+                  ]
+                  print(json.dumps(findings, default=str))
+                  response = sechub.batch_import_findings(Findings=findings)
                   print(response)
               except Exception as e:
                   print(e)
@@ -152,6 +157,8 @@ Resources:
   ECRToSecHubSendFindingsLambdaRole:
     Type: AWS::IAM::Role
     Properties:
+      ManagedPolicyArns:
+      - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
       - PolicyName: ECRToSecHubSendFindingsLambda-Policy
         PolicyDocument:
@@ -162,12 +169,7 @@ Resources:
             - cloudwatch:PutMetricData
             - securityhub:BatchImportFindings
             Resource: '*'
-          - Effect: Allow
-            Action:
-            - logs:CreateLogGroup
-            - logs:CreateLogStream
-            - logs:PutLogEvents
-            Resource: '*'
+
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -202,15 +204,19 @@ Resources:
       Environment:
         Variables:
           Region: !Ref 'AWS::Region'
+          Partition: !Ref 'AWS::Partition'
       Code:
         ZipFile: |
           import boto3
           import cfnresponse
           import os
+          import json
           def lambda_handler(event, context):
               try:
+                  print(json.dumps(event, default=str))
                   properties = event['ResourceProperties']
                   region = os.environ['Region']
+                  partition = os.environ['Partition']
                   client = boto3.client('securityhub', region_name=region)
                   responseData = {}
                   if event['RequestType'] == 'Create':
@@ -223,7 +229,7 @@ Resources:
                   elif event['RequestType'] == 'Delete':
                       account_id = context.invoked_function_arn.split(":")[4]
                       client.delete_action_target(
-                          ActionTargetArn=f"arn:aws:securityhub:{region}:{account_id}:action/custom/{properties['Id']}"
+                          ActionTargetArn=f"arn:{partition}:securityhub:{region}:{account_id}:action/custom/{properties['ActionTargetArn']}"
                       )
                   cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
               except Exception as e:
@@ -233,6 +239,8 @@ Resources:
   CreateSecurityHubCustomActionTargetLambdaRole:
     Type: AWS::IAM::Role
     Properties:
+      ManagedPolicyArns:
+      - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
       - PolicyName: CreateActionTarget-LambdaPolicy-ECR
         PolicyDocument:
@@ -241,12 +249,6 @@ Resources:
           - Effect: Allow
             Action:
             - cloudwatch:PutMetricData
-            Resource: '*'
-          - Effect: Allow
-            Action:
-            - logs:CreateLogGroup
-            - logs:CreateLogStream
-            - logs:PutLogEvents
             Resource: '*'
           - Effect: Allow
             Action:
@@ -265,25 +267,21 @@ Resources:
 # Create Remediation to deny ECR repository access 
 # -------------------------------------------------------------------------------------------------------------------------------------------------------
 
-  ECRAccessProhibitedRule: 
+  ECRAccessProhibitedRule:
     Type: AWS::Events::Rule
-    Properties: 
+    Properties:
       Name: ECRAccessProhibitedRule
       Description: "ECR1 - Deny Access to ECR due to vulnerability assesment"
-      EventPattern: 
-        source: 
+      EventPattern:
+        source:
           - aws.securityhub
-        detail-type: 
+        detail-type:
           - Security Hub Findings - Custom Action
-        resources: 
+        resources:
           - !GetAtt ECRActionTarget.Arn
       State: "ENABLED"
-      Targets: 
-        - 
-          Arn: 
-            Fn::GetAtt: 
-              - "ECRAccessProhibitedLambda"
-              - "Arn"
+      Targets:
+        - Arn: !Sub '${ECRAccessProhibitedLambda.Arn}'
           Id: "ECR1"
   
   ECRActionTarget:
@@ -293,17 +291,17 @@ Resources:
       ServiceToken: !GetAtt CreateSecurityHubCustomActionTargetLambda.Arn
       Name: ECR1
       Description: Deny Access to ECR
-      Id: ECR11
+      Id: ECR1
 
-  ECRAccessProhibitedLambdaPermission: 
+  ECRAccessProhibitedLambdaPermission:
     Type: AWS::Lambda::Permission
-    Properties: 
-      FunctionName: 
+    Properties:
+      FunctionName:
         Ref: "ECRAccessProhibitedLambda"
       Action: "lambda:InvokeFunction"
       Principal: "events.amazonaws.com"
-      SourceArn: 
-        Fn::GetAtt: 
+      SourceArn:
+        Fn::GetAtt:
           - "ECRAccessProhibitedRule"
           - "Arn"
 
@@ -323,7 +321,7 @@ Resources:
           import json
           import os
           def lambda_handler(event, context):
-    
+              print(json.dumps(event, default=str))
               repoName = str(event['detail']['findings'][0]['ProductFields']['ECRRepoName'])
               ecr = boto3.client('ecr')
               try:
@@ -341,6 +339,8 @@ Resources:
   ECRAccessProhibitedLambdaRole:
     Type: AWS::IAM::Role
     Properties:
+      ManagedPolicyArns:
+      - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
       - PolicyName: ECRAccessProhibitedLambdaPolicy
         PolicyDocument:
@@ -349,12 +349,6 @@ Resources:
           - Effect: Allow
             Action:
             - cloudwatch:PutMetricData
-            Resource: '*'
-          - Effect: Allow
-            Action:
-            - logs:CreateLogGroup
-            - logs:CreateLogStream
-            - logs:PutLogEvents
             Resource: '*'
           - Effect: Allow
             Action:
