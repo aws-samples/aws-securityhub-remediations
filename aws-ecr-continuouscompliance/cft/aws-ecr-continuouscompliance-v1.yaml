@@ -62,7 +62,7 @@ Resources:
           region: !Ref 'AWS::Region'
           partition: !Ref 'AWS::Partition'
       Code:
-        ZipFile: !Sub |
+        ZipFile: |
           import json
           import boto3
           import datetime
