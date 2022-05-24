@@ -218,23 +218,20 @@ Resources:
                   region = os.environ['Region']
                   partition = os.environ['Partition']
                   client = boto3.client('securityhub', region_name=region)
-                  responseData = {}
+                  phys_id = event.get('PhysicalResourceId')
                   if event['RequestType'] == 'Create':
                       response = client.create_action_target(
                           Name=properties['Name'],
                           Description=properties['Description'],
                           Id=properties['Id']
                       )
-                      responseData['Arn'] = response['ActionTargetArn']
+                      phys_id = response['ActionTargetArn']
                   elif event['RequestType'] == 'Delete':
-                      account_id = context.invoked_function_arn.split(":")[4]
-                      client.delete_action_target(
-                          ActionTargetArn=f"arn:{partition}:securityhub:{region}:{account_id}:action/custom/{properties['ActionTargetArn']}"
-                      )
-                  cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+                      client.delete_action_target(ActionTargetArn=phys_id)
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physicalResourceId=phys_id)
               except Exception as e:
                   print(e)
-                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, physicalResourceId=phys_id)
   
   CreateSecurityHubCustomActionTargetLambdaRole:
     Type: AWS::IAM::Role
@@ -278,7 +275,7 @@ Resources:
         detail-type:
           - Security Hub Findings - Custom Action
         resources:
-          - !GetAtt ECRActionTarget.Arn
+          - !Ref ECRActionTarget
       State: "ENABLED"
       Targets:
         - Arn: !Sub '${ECRAccessProhibitedLambda.Arn}'
@@ -296,14 +293,10 @@ Resources:
   ECRAccessProhibitedLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName:
-        Ref: "ECRAccessProhibitedLambda"
+      FunctionName: !Ref "ECRAccessProhibitedLambda"
       Action: "lambda:InvokeFunction"
       Principal: "events.amazonaws.com"
-      SourceArn:
-        Fn::GetAtt:
-          - "ECRAccessProhibitedRule"
-          - "Arn"
+      SourceArn: !Sub '${ECRAccessProhibitedRule.Arn}'
 
   ECRAccessProhibitedLambda:
     Type: AWS::Lambda::Function
