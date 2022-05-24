@@ -1,33 +1,31 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Description: Automated Image Scan Compliance for AWS EKS using AWS ECR and AWS Security Hub
 
 # ----------------------------------------------------------------------------------------------------------
-#  CloudFormation Template 1 of 1 - 
-#   
-#  
+#  CloudFormation Template 1 of 1 -
+#
+#
 #  1- Provisions CloudWatchEvents (EventBridge) Rule:
 #    - CloudWatchEvents Rule is triggered based on a AWS ECR Event for a completed Image Scan
 #  2- Provisions a Compliance Lambda as a target for the CloudWatch Events Rule.
-#  3- Compliance Lambda: 
+#  3- Compliance Lambda:
 #   - Obtains event details from the ECR Complated Image scan event
 #   - Creates a finding in AWS Security Hub
 #  4 - Provisions an AWS Security Hub Custom Action
 #    - Performs remediation by attaching restricted policy to ECR repository
-# 
-# 
+#
+#
 # @kmmahaj
 ##
 ## License:
 ## This code is made available under the MIT-0 license. See the LICENSE file.
 # ------------------------------------------------------------...............................................
 
- 
 Resources:
-
-# --------------------------------------------------------------------------------------------------
-#  1- Provisions a CloudWatchEvents Rule that is triggered based on ECR Image Scan Event
-#  2- Provisions a Lambda that creates a finding in AWS Security Hub 
-# --------------------------------------------------------------------------------------------------
+  # --------------------------------------------------------------------------------------------------
+  #  1- Provisions a CloudWatchEvents Rule that is triggered based on ECR Image Scan Event
+  #  2- Provisions a Lambda that creates a finding in AWS Security Hub
+  # --------------------------------------------------------------------------------------------------
 
   CaptureECRImageScanEvents:
     Type: AWS::Events::Rule
@@ -43,8 +41,8 @@ Resources:
       Name: CaptureECRScanEvent
       State: ENABLED
       Targets:
-      - Arn: !GetAtt "ECRToSecHubSendFindingsLambda.Arn"
-        Id: IDCaptureECRImageScanEvents
+        - Arn: !GetAtt "ECRToSecHubSendFindingsLambda.Arn"
+          Id: IDCaptureECRImageScanEvents
 
   ECRToSecHubSendFindingsLambda:
     Type: AWS::Lambda::Function
@@ -58,9 +56,9 @@ Resources:
       Timeout: 70
       Environment:
         Variables:
-          account_num: !Ref 'AWS::AccountId'
-          region: !Ref 'AWS::Region'
-          partition: !Ref 'AWS::Partition'
+          account_num: !Ref "AWS::AccountId"
+          region: !Ref "AWS::Region"
+          partition: !Ref "AWS::Partition"
       Code:
         ZipFile: |
           import json
@@ -153,30 +151,30 @@ Resources:
                   print(e)
                   print("Submitting finding to Security Hub failed, please troubleshoot further")
                   raise
-  
+
   ECRToSecHubSendFindingsLambdaRole:
     Type: AWS::IAM::Role
     Properties:
       ManagedPolicyArns:
-      - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-      - PolicyName: ECRToSecHubSendFindingsLambda-Policy
-        PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - cloudwatch:PutMetricData
-            - securityhub:BatchImportFindings
-            Resource: '*'
+        - PolicyName: ECRToSecHubSendFindingsLambda-Policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                  - securityhub:BatchImportFindings
+                Resource: "*"
 
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
-        - Effect: Allow
-          Principal: { Service: lambda.amazonaws.com }
-          Action:
-          - sts:AssumeRole
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action:
+              - sts:AssumeRole
 
   PermissionForEventsToInvokeLambdachk:
     Type: AWS::Lambda::Permission
@@ -186,10 +184,9 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt "CaptureECRImageScanEvents.Arn"
 
-
-# -------------------------------------------------------------------------------------------------------------------------------------------------------
-# 3. Create Remediation in Security Hub
-# -------------------------------------------------------------------------------------------------------------------------------------------------------
+  # -------------------------------------------------------------------------------------------------------------------------------------------------------
+  # 3. Create Remediation in Security Hub
+  # -------------------------------------------------------------------------------------------------------------------------------------------------------
 
   CreateSecurityHubCustomActionTargetLambda:
     Type: AWS::Lambda::Function
@@ -203,8 +200,8 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
-          Region: !Ref 'AWS::Region'
-          Partition: !Ref 'AWS::Partition'
+          Region: !Ref "AWS::Region"
+          Partition: !Ref "AWS::Partition"
       Code:
         ZipFile: |
           import boto3
@@ -232,37 +229,37 @@ Resources:
               except Exception as e:
                   print(e)
                   cfnresponse.send(event, context, cfnresponse.FAILED, {}, physicalResourceId=phys_id)
-  
+
   CreateSecurityHubCustomActionTargetLambdaRole:
     Type: AWS::IAM::Role
     Properties:
       ManagedPolicyArns:
-      - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-      - PolicyName: CreateActionTarget-LambdaPolicy-ECR
-        PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - cloudwatch:PutMetricData
-            Resource: '*'
-          - Effect: Allow
-            Action:
-            - securityhub:CreateActionTarget
-            - securityhub:DeleteActionTarget
-            Resource: '*'
+        - PolicyName: CreateActionTarget-LambdaPolicy-ECR
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - securityhub:CreateActionTarget
+                  - securityhub:DeleteActionTarget
+                Resource: "*"
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
-        - Effect: Allow
-          Principal: { Service: lambda.amazonaws.com }
-          Action:
-          - sts:AssumeRole
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action:
+              - sts:AssumeRole
 
-# -------------------------------------------------------------------------------------------------------------------------------------------------------
-# Create Remediation to deny ECR repository access 
-# -------------------------------------------------------------------------------------------------------------------------------------------------------
+  # -------------------------------------------------------------------------------------------------------------------------------------------------------
+  # Create Remediation to deny ECR repository access
+  # -------------------------------------------------------------------------------------------------------------------------------------------------------
 
   ECRAccessProhibitedRule:
     Type: AWS::Events::Rule
@@ -278,9 +275,9 @@ Resources:
           - !Ref ECRActionTarget
       State: "ENABLED"
       Targets:
-        - Arn: !Sub '${ECRAccessProhibitedLambda.Arn}'
+        - Arn: !Sub "${ECRAccessProhibitedLambda.Arn}"
           Id: "ECR1"
-  
+
   ECRActionTarget:
     Type: Custom::ActionTarget
     Version: 1.0
@@ -296,7 +293,7 @@ Resources:
       FunctionName: !Ref "ECRAccessProhibitedLambda"
       Action: "lambda:InvokeFunction"
       Principal: "events.amazonaws.com"
-      SourceArn: !Sub '${ECRAccessProhibitedRule.Arn}'
+      SourceArn: !Sub "${ECRAccessProhibitedRule.Arn}"
 
   ECRAccessProhibitedLambda:
     Type: AWS::Lambda::Function
@@ -305,7 +302,7 @@ Resources:
       Description: "ECR1 - Deny Access to ECR due to vulnerability assesment"
       Handler: index.lambda_handler
       MemorySize: 256
-      Role: !GetAtt  ECRAccessProhibitedLambdaRole.Arn
+      Role: !GetAtt ECRAccessProhibitedLambdaRole.Arn
       Runtime: python3.7
       Timeout: 60
       Code:
@@ -323,7 +320,7 @@ Resources:
                       repositoryName=repoName,
                       policyText=policyText
                   )
-        
+
               except Exception as e:
                   print(e)
                   print("SSM automation execution error")
@@ -333,27 +330,27 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       ManagedPolicyArns:
-      - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-      - PolicyName: ECRAccessProhibitedLambdaPolicy
-        PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - cloudwatch:PutMetricData
-            Resource: '*'
-          - Effect: Allow
-            Action:
-            - ssm:StartAutomationExecution
-            - ecr:*
-            - iam:PassRole
-            - securityhub:UpdateFindings
-            Resource: '*'
+        - PolicyName: ECRAccessProhibitedLambdaPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ssm:StartAutomationExecution
+                  - ecr:*
+                  - iam:PassRole
+                  - securityhub:UpdateFindings
+                Resource: "*"
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
-        - Effect: Allow
-          Principal: { Service: lambda.amazonaws.com }
-          Action:
-          - sts:AssumeRole
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action:
+              - sts:AssumeRole
