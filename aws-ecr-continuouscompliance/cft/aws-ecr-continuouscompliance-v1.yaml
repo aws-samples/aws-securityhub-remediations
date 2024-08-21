@@ -102,7 +102,7 @@ Resources:
 
 
               # ISO Time
-              iso8061Time = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc).isoformat()
+              iso8061Time = datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
               # ASFF BIF Id
               asffID = str(uuid.uuid4())
               # import security hub boto3 client
